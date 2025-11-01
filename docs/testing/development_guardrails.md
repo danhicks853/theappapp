@@ -11,12 +11,13 @@ This document creates strict guardrails to ensure I follow the enhanced tracker,
 
 Before starting ANY task, I must complete this checklist:
 
-### 📋 **CRITICAL: Task Execution Guide Compliance**
+### 📋 **CRITICAL: Task Execution Guide & Testing Philosophy Compliance**
 - [ ] **Read TASK_EXECUTION_GUIDE.md completely** - Follow the exact workflow from `docs/TASK_EXECUTION_GUIDE.md`
+- [ ] **Read TESTING_PHILOSOPHY.md completely** - Follow testing hierarchy and requirements from `docs/testing/testing_philosophy.md`
 - [ ] **Follow Step 1: Locate Next Task** - Find first TODO task in development_tracker.md
 - [ ] **Follow Step 2: Read Referenced Decision** - Open and understand the complete decision document
-- [ ] **Follow Step 3-7 sequentially** - Implementation → Tests → Run Tests → Resolve Failures → Documentation → Commit
-- [ ] **No deviations from guide** - The task execution guide is the source of truth for workflow
+- [ ] **Follow Step 3-7 sequentially** - Implementation → Tests → Run Tests → Resolve Failures → Documentation → Commit → Push
+- [ ] **No deviations from guides** - Both task execution guide and testing philosophy are source of truth
 
 ### 📋 **Task Validation**
 - [ ] **Task exists in enhanced tracker** - Verify task number and description
@@ -106,12 +107,15 @@ I must use this exact format for every task:
 After each task, I must answer:
 
 1. **Task Execution Guide Compliance**: Did I follow ALL steps from `docs/TASK_EXECUTION_GUIDE.md` exactly?
-2. **Decision Compliance**: Did I implement exactly what the decision specified?
-3. **Testing Compliance**: Did I follow the testing hierarchy (unit → integration → e2e)?
-4. **Quality Compliance**: Are ALL tests passing without modification?
-5. **Tracker Compliance**: Is the tracker updated accurately?
-6. **Documentation Compliance**: Is comprehensive documentation created and cross-referenced?
-7. **Reference Compliance**: Did I refer back to previous task documentation when needed?
+2. **Testing Philosophy Compliance**: Did I follow ALL requirements from `docs/testing/testing_philosophy.md`?
+3. **Decision Compliance**: Did I implement exactly what the decision specified?
+4. **Testing Compliance**: Did I follow the testing hierarchy (unit → integration → e2e)?
+5. **Coverage Compliance**: Did I meet coverage requirements (≥90% for all, ≥95% for critical modules)?
+6. **Quality Compliance**: Are ALL tests passing without modification?
+7. **Git Compliance**: Did I commit AND push all changes to repository?
+8. **Tracker Compliance**: Is the tracker updated accurately?
+9. **Documentation Compliance**: Is comprehensive documentation created and cross-referenced?
+10. **Reference Compliance**: Did I refer back to previous task documentation when needed?
 
 ### ❌ **Failure Modes**
 If any answer is "NO", I must:
@@ -145,6 +149,7 @@ Before marking any task complete, verify:
 If any of these conditions exist, I CANNOT proceed:
 
 - **Task execution guide not followed** - Stop and restart following `docs/TASK_EXECUTION_GUIDE.md` exactly
+- **Testing philosophy not followed** - Stop and review `docs/testing/testing_philosophy.md` requirements
 - **Task not found in tracker** - Stop and create missing task
 - **Decision reference unclear** - Stop and clarify with user
 - **Any test failing** - Stop and fix implementation
@@ -156,6 +161,7 @@ If any of these conditions exist, I CANNOT proceed:
 - **Previous docs not referenced** - Stop and review and reference prior work
 - **Tests not run before commit** - Stop and run full test suite
 - **Implementation not committed to git** - Stop and commit with proper message
+- **Changes not pushed to repository** - Stop and push all commits with `git push`
 
 ---
 
@@ -206,6 +212,7 @@ Every task completion must include:
 
 ### 🚫 **Common Deviations to Avoid**
 - **Not following task execution guide** - CRITICAL - Follow `docs/TASK_EXECUTION_GUIDE.md` exactly, every step
+- **Not following testing philosophy** - CRITICAL - Follow `docs/testing/testing_philosophy.md` requirements exactly
 - **Skipping unit tests** - NEVER allowed
 - **Modifying tests to pass** - NEVER allowed
 - **Implementing extra features** - Stay within decision scope
@@ -216,6 +223,7 @@ Every task completion must include:
 - **Poor cross-referencing** - Link all related components clearly
 - **Not running tests before commit** - ALWAYS run full test suite
 - **Not committing to git** - ALWAYS commit with descriptive message
+- **Not pushing to repository** - ALWAYS push after commit with `git push`
 
 ### ⚠️ **Warning Signs**
 If I find myself doing any of these, I must STOP:
@@ -278,7 +286,9 @@ After each phase, I will:
 
 ## Notes
 - **CRITICAL**: Task Execution Guide (`docs/TASK_EXECUTION_GUIDE.md`) is the PRIMARY workflow reference
+- **CRITICAL**: Testing Philosophy (`docs/testing/testing_philosophy.md`) is the PRIMARY testing reference
 - Follow task execution guide steps 1-7 EXACTLY for every task - no deviations
+- Follow testing philosophy requirements EXACTLY for every task - no deviations
 - These guardrails are MANDATORY - no exceptions
 - Quality is non-negotiable - never compromise standards
 - Enhanced specifications are the source of truth - always reference
@@ -291,7 +301,9 @@ After each phase, I will:
 - Acceptance criteria must be met - from enhanced specification
 - When in doubt - ask for clarification before proceeding
 - All 300 tasks are fully specified - use the enhanced specifications as your primary guide
-- **WORKFLOW**: Task Execution Guide → Development Tracker → Decision Document → Implementation → Tests → Documentation → Commit
+- **WORKFLOW**: Task Execution Guide → Development Tracker → Decision Document → Implementation → Tests (per Testing Philosophy) → Documentation → Commit → Push
+- **TESTING**: Always follow testing hierarchy: Unit (≥90% coverage) → Integration (≥75% coverage) → E2E (≥70% coverage)
+- **GIT**: Always commit with descriptive message AND push to repository - never leave commits unpushed
 
 ---
 
