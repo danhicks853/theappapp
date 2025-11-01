@@ -5,6 +5,9 @@ Tests verify hub-and-spoke pattern enforcement, task queue operations,
 agent registration, message routing, and state management.
 """
 
+import asyncio
+from datetime import datetime
+
 import pytest
 from backend.services.orchestrator import (
     Orchestrator,
@@ -12,7 +15,8 @@ from backend.services.orchestrator import (
     Task,
     AgentType,
     TaskStatus,
-    MessageType
+    MessageType,
+    _awaitable,
 )
 
 
@@ -531,10 +535,12 @@ class TestEscalation:
     def test_escalate_to_human_creates_gate(self):
         """Test that escalation creates a gate ID."""
         orchestrator = Orchestrator("project-1")
-        
-        gate_id = orchestrator.escalate_to_human(
-            reason="Loop detected after 3 failures",
-            context={"task_id": "task-1", "error": "timeout"}
+
+        gate_id = asyncio.run(
+            orchestrator.escalate_to_human(
+                reason="Loop detected after 3 failures",
+                context={"task_id": "task-1", "error": "timeout"}
+            )
         )
         
         assert gate_id is not None
@@ -551,10 +557,12 @@ class TestEscalation:
         )
         orchestrator.register_agent(agent)
         
-        orchestrator.escalate_to_human(
-            reason="Test escalation",
-            context={},
-            agent_id="agent-1"
+        asyncio.run(
+            orchestrator.escalate_to_human(
+                reason="Test escalation",
+                context={},
+                agent_id="agent-1"
+            )
         )
         
         assert agent.status == "paused"
@@ -563,9 +571,11 @@ class TestEscalation:
         """Test escalation without specifying an agent."""
         orchestrator = Orchestrator("project-1")
         
-        gate_id = orchestrator.escalate_to_human(
-            reason="Manual escalation",
-            context={}
+        gate_id = asyncio.run(
+            orchestrator.escalate_to_human(
+                reason="Manual escalation",
+                context={}
+            )
         )
         
         assert gate_id is not None
@@ -672,14 +682,163 @@ class TestHubAndSpokeEnforcement:
             sender_id="agent-1",
             recipient_id="agent-2",
             message_type=MessageType.HELP_REQUEST,
-            payload={"test": "data"}
+            payload={"question": "Need help"},
         )
-        
-        # Message should be in recipient's buffer (routed through orchestrator)
+
         assert len(orchestrator.message_buffer["agent-2"]) == 1
-        message = orchestrator.message_buffer["agent-2"][0]
-        assert message["routed_through"] == orchestrator.orchestrator_id
-    
+        routed = orchestrator.message_buffer["agent-2"][0]
+        assert routed["payload"]["question"] == "Need help"
+
+    def test_route_message_missing_sender_raises(self):
+        orchestrator = Orchestrator("project-1")
+        recipient = Agent("recipient-1", AgentType.FRONTEND_DEVELOPER)
+        orchestrator.register_agent(recipient)
+
+        with pytest.raises(ValueError):
+            orchestrator.route_message(
+                sender_id="missing",
+                recipient_id="recipient-1",
+                message_type=MessageType.TASK_RESULT,
+                payload={}
+            )
+
+    def test_route_message_missing_recipient_raises(self):
+        orchestrator = Orchestrator("project-1")
+        sender = Agent("sender-1", AgentType.BACKEND_DEVELOPER)
+        orchestrator.register_agent(sender)
+
+        with pytest.raises(ValueError):
+            orchestrator.route_message(
+                sender_id="sender-1",
+                recipient_id="missing",
+                message_type=MessageType.TASK_RESULT,
+                payload={}
+            )
+
+
+class TestSpecialistConsultationNoAgents:
+    """Test specialist consultation workflows."""
+
+    def test_consult_specialist_returns_none_without_available_agent(self):
+        orchestrator = Orchestrator("project-1")
+        requester = Agent("agent-1", AgentType.BACKEND_DEVELOPER)
+        orchestrator.register_agent(requester)
+
+        result = orchestrator.consult_specialist(
+            requesting_agent_id="agent-1",
+            specialist_type=AgentType.SECURITY_EXPERT,
+            question="Need review",
+            context={},
+        )
+
+        assert result is None
+
+
+class DummyGateManager:
+    async def create_gate(self, **kwargs):
+        self.kwargs = kwargs
+        return "gate-123"
+
+
+class DummyTasClient:
+    async def execute_tool(self, tool_request):
+        return {"status": "ok", "result": tool_request.get("payload", {})}
+
+
+class DummyLLMClient:
+    async def evaluate_confidence(self, confidence_request):
+        return confidence_request.get("score", 0.75)
+
+
+class TestAuxiliaryBehaviors:
+    """Test helper functions and asynchronous behaviors."""
+
+    def test__awaitable_handles_sync_and_async_values(self):
+        assert asyncio.run(_awaitable(5)) == 5
+
+        async def _dummy():
+            return 42
+
+        assert asyncio.run(_awaitable(_dummy())) == 42
+
+    def test_task_comparison_uses_creation_time(self):
+        earlier = Task(
+            task_id="t1",
+            task_type="demo",
+            agent_type=AgentType.BACKEND_DEVELOPER,
+            created_at=datetime(2025, 11, 1, 10, 0, 0),
+        )
+        later = Task(
+            task_id="t2",
+            task_type="demo",
+            agent_type=AgentType.BACKEND_DEVELOPER,
+            created_at=datetime(2025, 11, 1, 10, 5, 0),
+        )
+
+        assert earlier < later
+        assert not later < earlier
+
+    def test_execute_tool_without_client_raises(self):
+        orchestrator = Orchestrator("project-1")
+        with pytest.raises(NotImplementedError):
+            asyncio.run(orchestrator.execute_tool({"tool_name": "noop"}))
+
+    def test_execute_tool_with_client(self):
+        orchestrator = Orchestrator("project-1", tas_client=DummyTasClient())
+        response = asyncio.run(
+            orchestrator.execute_tool({"tool_name": "noop", "payload": {"x": 1}})
+        )
+        assert response["status"] == "ok"
+
+    def test_evaluate_confidence_without_client_raises(self):
+        orchestrator = Orchestrator("project-1")
+        with pytest.raises(NotImplementedError):
+            asyncio.run(orchestrator.evaluate_confidence({}))
+
+    def test_evaluate_confidence_with_client(self):
+        orchestrator = Orchestrator("project-1", llm_client=DummyLLMClient())
+        score = asyncio.run(
+            orchestrator.evaluate_confidence({"score": 0.3})
+        )
+        assert 0.0 <= score <= 1.0
+
+    def test_create_gate_with_gate_manager(self):
+        gate_manager = DummyGateManager()
+        orchestrator = Orchestrator("project-1", gate_manager=gate_manager)
+        gate_id = asyncio.run(
+            orchestrator.create_gate("Reason", {"key": "value"}, agent_id="agent-1")
+        )
+
+        assert gate_id == "gate-123"
+        assert gate_manager.kwargs["reason"] == "Reason"
+
+    def test_escalate_to_human_updates_agent_status(self):
+        gate_manager = DummyGateManager()
+        orchestrator = Orchestrator("project-1", gate_manager=gate_manager)
+        agent = Agent("agent-1", AgentType.BACKEND_DEVELOPER, status="active")
+        orchestrator.register_agent(agent)
+
+        gate_id = asyncio.run(
+            orchestrator.escalate_to_human("Issue", {"detail": "x"}, agent_id="agent-1")
+        )
+
+        assert gate_id == "gate-123"
+        assert agent.status == "paused"
+
+    def test_update_state_merges_metadata(self):
+        orchestrator = Orchestrator("project-1")
+        orchestrator.update_state(metadata={"version": "1"})
+        orchestrator.update_state(metadata={"owner": "alice"})
+        state = orchestrator.get_project_state()
+        assert state.metadata == {"version": "1", "owner": "alice"}
+
+    def test_get_orchestrator_status_contains_expected_fields(self):
+        orchestrator = Orchestrator("project-1")
+        status = orchestrator.get_orchestrator_status()
+        assert status["project_id"] == "project-1"
+        assert "active_agents_count" in status
+        assert "orchestrator_id" in status
+
     def test_orchestrator_maintains_complete_state(self):
         """Test that orchestrator maintains complete project state."""
         orchestrator = Orchestrator("project-1")

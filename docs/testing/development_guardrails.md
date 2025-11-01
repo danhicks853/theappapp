@@ -36,6 +36,7 @@ Before starting ANY task, I must complete this checklist:
 ### 🧪 **Test Preparation**
 - [ ] **Unit test scenarios identified** - List all test cases needed
 - [ ] **Integration test scope defined** - What components interact
+- [ ] **Integration environment confirmed** - Postgres fixtures configured and running (no in-memory DBs)
 - [ ] **E2E test relevance confirmed** - How this fits phase testing
 - [ ] **Testing tools selected** - Frameworks and libraries needed
 
@@ -150,6 +151,7 @@ If any of these conditions exist, I CANNOT proceed:
 
 - **Task execution guide not followed** - Stop and restart following `docs/TASK_EXECUTION_GUIDE.md` exactly
 - **Testing philosophy not followed** - Stop and review `docs/testing/testing_philosophy.md` requirements
+- **Integration database not Postgres** - Stop and switch to Postgres-backed fixtures before running tests
 - **Task not found in tracker** - Stop and create missing task
 - **Decision reference unclear** - Stop and clarify with user
 - **Any test failing** - Stop and fix implementation

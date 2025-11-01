@@ -53,6 +53,7 @@ def test_orchestrator_initialization():
 - **100% coverage** for data persistence and recovery scenarios
 
 **Quality Requirements**:
+- **Real database** - Tests **must** run against the Postgres fixtures defined in `backend/tests/integration/conftest.py` (no SQLite or in-memory substitutes)
 - **Component interaction** - Test how tasks work together
 - **Database integration** - Real database operations (TestContainers)
 - **External service mocking** - Controlled external dependencies
@@ -79,7 +80,7 @@ def test_orchestrator_agent_coordination():
     assert result.status == "assigned"
 ```
 
-**Tools**: pytest with fixtures, TestContainers, real databases
+**Tools**: pytest with fixtures, TestContainers, real PostgreSQL/Redis
 
 ### 3. End-to-End Tests - Every Phase
 **Scope**: Each complete phase (Phase 1, Phase 2, etc.)
