@@ -440,7 +440,7 @@ result = obj.method()
 
 ---
 
-## Step 9: Update Task Status
+## Step 9: Update Task Status & Commit
 
 ### In development_tracker.md
 
@@ -461,6 +461,35 @@ result = obj.method()
   - **Coverage**: [X%]
   - **Documentation**: `docs/implementation/phase[N]/[file].md`
 ```
+
+### Git Commit
+
+**After marking complete, commit your work**:
+
+```bash
+# Stage all changes
+git add .
+
+# Commit with descriptive message
+git commit -m "feat: [Task number] - [Task title]
+
+- Implementation: [file path]
+- Tests: [test file path]
+- Coverage: [X%]
+- Documentation: docs/implementation/phase[N]/[file].md
+
+Closes #[task number]"
+
+# Push to GitHub
+git push
+```
+
+**Commit Message Format**:
+- `feat:` for new features/implementations
+- `test:` for test additions
+- `docs:` for documentation only
+- `fix:` for bug fixes
+- `refactor:` for code improvements
 
 ---
 
@@ -487,6 +516,11 @@ TESTS:
 DOCUMENTATION:
 - Location: docs/implementation/phase[N]/[file].md
 - Includes: Usage examples, design decisions, dependencies
+
+GIT:
+- Committed: Yes
+- Pushed to GitHub: Yes
+- Commit: [commit hash]
 
 NEXT TASK:
 - [Next task number]: [Next task title]
