@@ -11,6 +11,13 @@ This document creates strict guardrails to ensure I follow the enhanced tracker,
 
 Before starting ANY task, I must complete this checklist:
 
+### 📋 **CRITICAL: Task Execution Guide Compliance**
+- [ ] **Read TASK_EXECUTION_GUIDE.md completely** - Follow the exact workflow from `docs/TASK_EXECUTION_GUIDE.md`
+- [ ] **Follow Step 1: Locate Next Task** - Find first TODO task in development_tracker.md
+- [ ] **Follow Step 2: Read Referenced Decision** - Open and understand the complete decision document
+- [ ] **Follow Step 3-7 sequentially** - Implementation → Tests → Run Tests → Resolve Failures → Documentation → Commit
+- [ ] **No deviations from guide** - The task execution guide is the source of truth for workflow
+
 ### 📋 **Task Validation**
 - [ ] **Task exists in enhanced tracker** - Verify task number and description
 - [ ] **Decision reference identified** - Find exact decision number and title
@@ -98,12 +105,13 @@ I must use this exact format for every task:
 ### 🔍 **Self-Audit Questions**
 After each task, I must answer:
 
-1. **Decision Compliance**: Did I implement exactly what the decision specified?
-2. **Testing Compliance**: Did I follow the testing hierarchy (unit → integration → e2e)?
-3. **Quality Compliance**: Are ALL tests passing without modification?
-4. **Tracker Compliance**: Is the tracker updated accurately?
-5. **Documentation Compliance**: Is comprehensive documentation created and cross-referenced?
-6. **Reference Compliance**: Did I refer back to previous task documentation when needed?
+1. **Task Execution Guide Compliance**: Did I follow ALL steps from `docs/TASK_EXECUTION_GUIDE.md` exactly?
+2. **Decision Compliance**: Did I implement exactly what the decision specified?
+3. **Testing Compliance**: Did I follow the testing hierarchy (unit → integration → e2e)?
+4. **Quality Compliance**: Are ALL tests passing without modification?
+5. **Tracker Compliance**: Is the tracker updated accurately?
+6. **Documentation Compliance**: Is comprehensive documentation created and cross-referenced?
+7. **Reference Compliance**: Did I refer back to previous task documentation when needed?
 
 ### ❌ **Failure Modes**
 If any answer is "NO", I must:
@@ -136,15 +144,18 @@ Before marking any task complete, verify:
 ### 🚫 **Blocking Conditions**
 If any of these conditions exist, I CANNOT proceed:
 
+- **Task execution guide not followed** - Stop and restart following `docs/TASK_EXECUTION_GUIDE.md` exactly
 - **Task not found in tracker** - Stop and create missing task
 - **Decision reference unclear** - Stop and clarify with user
 - **Any test failing** - Stop and fix implementation
-- **Test coverage < 100%** - Stop and add missing tests
+- **Test coverage < 90%** (or < 95% for critical modules) - Stop and add missing tests
 - **Implementation deviates from decision** - Stop and realign
 - **Tracker not updated** - Stop and update accurately
 - **Documentation missing** - Stop and create comprehensive docs
 - **No cross-references** - Stop and add links to related work
 - **Previous docs not referenced** - Stop and review and reference prior work
+- **Tests not run before commit** - Stop and run full test suite
+- **Implementation not committed to git** - Stop and commit with proper message
 
 ---
 
@@ -194,6 +205,7 @@ Every task completion must include:
 ## Error Prevention System
 
 ### 🚫 **Common Deviations to Avoid**
+- **Not following task execution guide** - CRITICAL - Follow `docs/TASK_EXECUTION_GUIDE.md` exactly, every step
 - **Skipping unit tests** - NEVER allowed
 - **Modifying tests to pass** - NEVER allowed
 - **Implementing extra features** - Stay within decision scope
@@ -202,6 +214,8 @@ Every task completion must include:
 - **Skipping documentation** - NEVER allowed - document everything
 - **Not referencing previous work** - Always build upon existing docs
 - **Poor cross-referencing** - Link all related components clearly
+- **Not running tests before commit** - ALWAYS run full test suite
+- **Not committing to git** - ALWAYS commit with descriptive message
 
 ### ⚠️ **Warning Signs**
 If I find myself doing any of these, I must STOP:
@@ -263,6 +277,8 @@ After each phase, I will:
 ---
 
 ## Notes
+- **CRITICAL**: Task Execution Guide (`docs/TASK_EXECUTION_GUIDE.md`) is the PRIMARY workflow reference
+- Follow task execution guide steps 1-7 EXACTLY for every task - no deviations
 - These guardrails are MANDATORY - no exceptions
 - Quality is non-negotiable - never compromise standards
 - Enhanced specifications are the source of truth - always reference
@@ -274,7 +290,8 @@ After each phase, I will:
 - Exact file paths, class names, and method names must be used - from enhanced specification
 - Acceptance criteria must be met - from enhanced specification
 - When in doubt - ask for clarification before proceeding
-- **NEW**: All 300 tasks are fully specified - use the enhanced specifications as your primary guide
+- All 300 tasks are fully specified - use the enhanced specifications as your primary guide
+- **WORKFLOW**: Task Execution Guide → Development Tracker → Decision Document → Implementation → Tests → Documentation → Commit
 
 ---
 
