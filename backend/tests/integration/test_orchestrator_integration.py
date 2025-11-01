@@ -8,6 +8,8 @@ Tests verify end-to-end orchestrator workflows including:
 - State management across operations
 """
 
+import asyncio
+
 from backend.services.orchestrator import (
     Orchestrator,
     Agent,
@@ -169,14 +171,16 @@ class TestOrchestratorHubAndSpokeWorkflow:
             failures.append(task)
         
         # After 3 failures, escalate to human
-        gate_id = orchestrator.escalate_to_human(
-            reason="Loop detected: 3 identical failures",
-            context={
-                "task_id": "task-2",
-                "error": "Timeout after 30 seconds",
-                "attempts": 3
-            },
-            agent_id="agent-1"
+        gate_id = asyncio.run(
+            orchestrator.escalate_to_human(
+                reason="Loop detected: 3 identical failures",
+                context={
+                    "task_id": "task-2",
+                    "error": "Timeout after 30 seconds",
+                    "attempts": 3
+                },
+                agent_id="agent-1"
+            )
         )
         
         # Verify escalation
@@ -334,10 +338,12 @@ class TestOrchestratorAgentManagement:
         assert agent.status == "active"
         
         # Escalate - agent becomes paused
-        orchestrator.escalate_to_human(
-            reason="Test",
-            context={},
-            agent_id="agent-1"
+        asyncio.run(
+            orchestrator.escalate_to_human(
+                reason="Test",
+                context={},
+                agent_id="agent-1"
+            )
         )
         assert agent.status == "paused"
     

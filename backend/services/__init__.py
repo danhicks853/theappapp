@@ -1,5 +1,12 @@
 """Backend services package."""
 
+from .agent_lifecycle_manager import (
+    AgentLifecycleManager,
+    AgentLifecycleState,
+    AgentLifecycleSnapshot,
+    AgentResources,
+    LifecycleStateError,
+)
 from .orchestrator import Orchestrator, Agent, Task, AgentType, TaskStatus, MessageType
 
 __all__ = [
@@ -8,5 +15,10 @@ __all__ = [
     "Task",
     "AgentType",
     "TaskStatus",
-    "MessageType"
+    "MessageType",
+    "AgentLifecycleManager",
+    "AgentLifecycleState",
+    "AgentLifecycleSnapshot",
+    "AgentResources",
+    "LifecycleStateError",
 ]

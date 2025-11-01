@@ -1,3 +1,6 @@
 pytest==7.4.3
 pytest-cov==4.1.0
 pydantic==2.5.0
+SQLAlchemy==2.0.25
+alembic==1.13.1
+psycopg[binary]==3.1.12

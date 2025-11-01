@@ -1,23 +1,23 @@
-"""
-Orchestrator Core System - Hub-and-Spoke Architecture
+"""Orchestrator Core System - Hub-and-Spoke Architecture."""
 
-The Orchestrator is the central coordinator in the hub-and-spoke architecture.
-All agents communicate through the orchestrator; no direct agent-to-agent communication is allowed.
+from __future__ import annotations
 
-Architecture:
-- Hub: Orchestrator (this class)
-- Spokes: All agents (Backend Dev, Frontend Dev, QA, Security, DevOps, etc.)
-- Communication: All messages flow through orchestrator
-- State: Orchestrator maintains complete project state
-- Coordination: Orchestrator makes routing and escalation decisions
-"""
-
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, field
-from enum import Enum
-from datetime import datetime
+import asyncio
+import logging
 import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import Enum
 from queue import PriorityQueue
+from typing import Any, Awaitable, Dict, List, Optional
+
+
+async def _awaitable(value: Any) -> Any:
+    """Await value if needed, otherwise return synchronously."""
+
+    if asyncio.iscoroutine(value) or isinstance(value, Awaitable):
+        return await value
+    return value
 
 
 class AgentType(Enum):
@@ -120,7 +120,14 @@ class Orchestrator:
     - Update project state
     """
     
-    def __init__(self, project_id: str):
+    def __init__(
+        self,
+        project_id: str,
+        *,
+        tas_client: Optional[Any] = None,
+        llm_client: Optional[Any] = None,
+        gate_manager: Optional[Any] = None,
+    ):
         """
         Initialize the Orchestrator.
         
@@ -145,7 +152,13 @@ class Orchestrator:
         
         # Message routing - stores pending messages for agents
         self.message_buffer: Dict[str, List[Dict[str, Any]]] = {}
-        
+
+        # External service dependencies
+        self.tas_client = tas_client
+        self.llm_client = llm_client
+        self.gate_manager = gate_manager
+        self.logger = logging.getLogger("orchestrator")
+
         # Initialization timestamp
         self.created_at = datetime.now()
     
@@ -437,11 +450,11 @@ class Orchestrator:
             "specialist_type": specialist_type.value
         }
     
-    def escalate_to_human(
+    async def escalate_to_human(
         self,
         reason: str,
         context: Dict[str, Any],
-        agent_id: Optional[str] = None
+        agent_id: Optional[str] = None,
     ) -> str:
         """
         Escalate an issue to human review.
@@ -456,25 +469,75 @@ class Orchestrator:
         Returns:
             Gate ID for tracking the escalation
         """
-        gate_id = str(uuid.uuid4())
-        
-        # Pause the agent if specified
         if agent_id and agent_id in self.active_agents:
             agent = self.active_agents[agent_id]
             agent.status = "paused"
-        
-        # Create escalation record structure for database storage
-        # In production, this would be stored in database:
-        # {
-        #     "gate_id": gate_id,
-        #     "project_id": self.project_id,
-        #     "reason": reason,
-        #     "context": context,
-        #     "agent_id": agent_id,
-        #     "created_at": datetime.now().isoformat(),
-        #     "status": "pending_approval"
-        # }
-        
+
+        gate_id = await self.create_gate(reason=reason, context=context, agent_id=agent_id)
+
+        # TODO: persist escalation record per Decision 76 once storage layer exists
+        return gate_id
+
+    async def execute_tool(self, tool_request: Dict[str, Any]) -> Dict[str, Any]:
+        """Forward a tool execution request to TAS and return the audited result."""
+
+        if not self.tas_client or not hasattr(self.tas_client, "execute_tool"):
+            raise NotImplementedError("TAS client not configured for orchestrator")
+
+        response = await _awaitable(self.tas_client.execute_tool(tool_request))
+        audit_record = {
+            "status": response.get("status", "unknown"),
+            "result": response.get("result"),
+            "error": response.get("error"),
+            "audited_at": datetime.now(UTC).isoformat(),
+        }
+        self.logger.info(
+            "Tool execution routed | tool=%s | status=%s",
+            tool_request.get("tool_name"),
+            audit_record["status"],
+        )
+        return audit_record
+
+    async def evaluate_confidence(self, confidence_request: Dict[str, Any]) -> float:
+        """Evaluate agent confidence using the configured LLM client."""
+
+        if not self.llm_client or not hasattr(self.llm_client, "evaluate_confidence"):
+            raise NotImplementedError("LLM client not configured for confidence evaluation")
+
+        response = await _awaitable(
+            self.llm_client.evaluate_confidence(confidence_request)
+        )
+        try:
+            score = float(response)
+        except (TypeError, ValueError):
+            self.logger.warning("Invalid confidence score response: %s", response)
+            return 0.0
+
+        return max(0.0, min(1.0, score))
+
+    async def create_gate(
+        self, reason: str, context: Dict[str, Any], agent_id: Optional[str]
+    ) -> str:
+        """Create a human approval gate and return its identifier."""
+
+        gate_payload = {
+            "project_id": self.project_id,
+            "reason": reason,
+            "context": context,
+            "agent_id": agent_id,
+        }
+
+        if self.gate_manager and hasattr(self.gate_manager, "create_gate"):
+            gate_id = await _awaitable(self.gate_manager.create_gate(**gate_payload))
+        else:
+            gate_id = str(uuid.uuid4())
+
+        self.logger.info(
+            "Gate created | gate_id=%s | reason=%s | agent=%s",
+            gate_id,
+            reason,
+            agent_id,
+        )
         return gate_id
     
     def update_state(
