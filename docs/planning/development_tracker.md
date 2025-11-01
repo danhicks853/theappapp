@@ -66,7 +66,98 @@ This document tracks all development tasks derived from our 6-phase planning. Ea
   - **Acceptance**: Agents start/stop cleanly, pause/resume preserves state, resources released on cleanup, no orphaned processes
   - **Test**: Lifecycle transition tests, resource cleanup tests, pause/resume state preservation tests
 
+### 1.2.0 Agent Execution Loop Architecture (Decision 83) - P0 BLOCKING
+**Reference**: `docs/architecture/decision-83-agent-execution-loop-architecture.md`
+**Priority**: P0 - BLOCKS ALL AGENT IMPLEMENTATIONS
+**Dependencies**: Requires 1.1 (Orchestrator Core System) complete
+
+⚠️ **CRITICAL**: This section MUST be completed before sections 1.1.1, 1.2+. Prevents "fake agent loops" risk and defines orchestrator methods needed by LLM integration.
+
+- [ ] **TODO**: Implement BaseAgent class with iterative execution loop
+  - **File**: `backend/agents/base_agent.py`
+  - **Class**: `BaseAgent` with methods: `run_task()`, `_plan_next_step()`, `_execute_step_with_retry()`, `_validate_step()`, `_update_state()`, `_should_terminate()`
+  - **Pattern**: Goal-based termination loop with while-not-done iteration
+  - **Acceptance**: Real iterative loop (not single-shot), terminates on multiple criteria, full state tracking
+  - **Test**: Unit tests for loop execution, termination conditions, state management
+
+- [ ] **TODO**: Implement TaskState and Step data models
+  - **File**: `backend/models/agent_state.py`
+  - **Classes**: `TaskState`, `Step`, `Action`, `Result`, `ValidationResult`, `LLMCall`, `ToolExecution`
+  - **State**: Full audit state with steps history, artifacts, failures, progress, resources, reasoning
+  - **Acceptance**: Complete state tracking for debugging and recovery
+  - **Test**: State serialization, history tracking, metrics calculation
+
+- [ ] **TODO**: Implement LoopDetector class
+  - **File**: `backend/services/loop_detector.py`
+  - **Class**: `LoopDetector` with methods: `is_looping()`, `record_failure()`, `record_success()`
+  - **Logic**: Detect 3 consecutive identical errors (exact string match)
+  - **Acceptance**: Detects loops accurately, fast (<1ms), integrates with agent execution
+  - **Test**: Loop detection with identical/different errors, false positive prevention
+
+- [ ] **TODO**: Add orchestrator.execute_tool() method
+  - **File**: `backend/services/orchestrator.py`
+  - **Method**: `async def execute_tool(tool_request: dict) -> dict`
+  - **Flow**: Orchestrator → TAS → Tool → TAS Audit → Orchestrator
+  - **Acceptance**: Routes to TAS, returns result with audit logging
+  - **Test**: Integration test with mock TAS
+
+- [ ] **TODO**: Add orchestrator.evaluate_confidence() method
+  - **File**: `backend/services/orchestrator.py`
+  - **Method**: `async def evaluate_confidence(confidence_request: dict) -> float`
+  - **Logic**: LLM evaluates agent progress/approach, returns 0.0-1.0 score
+  - **Triggers**: Every 5 steps, on agent uncertainty, on explicit request
+  - **Threshold**: <0.5 triggers human gate
+  - **Acceptance**: Returns confidence score with reasoning
+  - **Test**: Confidence evaluation with various scenarios
+
+- [ ] **TODO**: Verify orchestrator.create_gate() method exists
+  - **File**: `backend/services/orchestrator.py`
+  - **Method**: `async def create_gate(reason: str, context: dict, agent_id: str) -> str`
+  - **Purpose**: Create human approval gate, pause agent
+  - **Returns**: gate_id
+  - **Note**: May already exist from Decision 67, verify and enhance if needed
+
+- [ ] **TODO**: Create agent execution database tables
+  - **Migration**: Alembic migration file
+  - **Tables**: `agent_execution_history`, `agent_execution_steps`
+  - **Schema**: Track complete execution: steps, reasoning, actions, results, costs
+  - **Acceptance**: Tables created, indexes applied, supports audit queries
+  - **Test**: Database schema test
+
+- [ ] **TODO**: Implement intelligent retry with replanning
+  - **File**: `backend/agents/base_agent.py` - `_execute_step_with_retry()` method
+  - **Logic**: Max 3 retries, each with DIFFERENT approach (replan after failure)
+  - **Backoff**: Exponential (2^attempt seconds)
+  - **Acceptance**: Retries use different approaches, not identical attempts
+  - **Test**: Verify replanning logic, prevent identical retries
+
+- [ ] **TODO**: Implement hybrid progress validation
+  - **File**: `backend/agents/base_agent.py` - `_evaluate_progress()` method
+  - **Priority**: Test metrics → Artifact metrics → LLM evaluation
+  - **Acceptance**: Uses quantifiable metrics first, LLM as fallback
+  - **Test**: Progress evaluation with tests, artifacts, and subjective tasks
+
+- [ ] **TODO**: Write comprehensive unit tests for base agent
+  - **File**: `backend/tests/unit/test_base_agent.py`
+  - **Coverage**: Loop execution, termination criteria, retry logic, state management, loop detection
+  - **Scenarios**: Success, failure, loop detection, confidence gating, timeout, cost limit
+  - **Acceptance**: 100% code coverage, all scenarios tested
+  - **Test**: Run test suite, verify coverage report
+
+- [ ] **TODO**: Write integration tests for execution loop
+  - **File**: `backend/tests/integration/test_agent_execution_loop.py`
+  - **Coverage**: Full task execution, TAS integration, orchestrator confidence checks, loop escalation
+  - **Acceptance**: Complete end-to-end execution with real components
+  - **Test**: Integration test suite passes
+
+- [ ] **TODO**: Create execution loop implementation guide
+  - **File**: `docs/implementation/base-agent-implementation-guide.md`
+  - **Content**: How to implement agents, examples, patterns, anti-patterns
+  - **Acceptance**: Complete guide for developers implementing agents
+  - **Test**: Review guide completeness
+
 ### 1.1.1 Orchestrator LLM Integration (Decision 67)
+**Dependencies**: Requires 1.2.0 (Agent Execution Loop) complete - uses orchestrator.evaluate_confidence()
 **Reference**: `docs/architecture/decision-67-orchestrator-llm-integration.md`
 
 - [ ] **TODO**: Implement OrchestratorLLMClient with full chain-of-thought reasoning
@@ -132,17 +223,20 @@ This document tracks all development tasks derived from our 6-phase planning. Ea
   - **Test**: Unit tests for various collaboration scenarios (security, performance, architecture)
 
 ### 1.2 Agent System Architecture (REVISED FOR LLM INTEGRATION)
+**NOTE**: All tasks in this section BLOCKED until 1.2.0 (Agent Execution Loop) is complete.
+
 - [ ] **TODO**: Create base agent class with common functionality
-- [ ] **TODO**: Implement Backend Developer agent (TRADITIONAL - NEEDS REFACTOR)
-- [ ] **TODO**: Implement Frontend Developer agent (TRADITIONAL - NEEDS REFACTOR)
-- [ ] **TODO**: Implement QA Engineer agent (TRADITIONAL - NEEDS REFACTOR)
-- [ ] **TODO**: Implement Security Expert agent (TRADITIONAL - NEEDS REFACTOR)
-- [ ] **TODO**: Implement DevOps Engineer agent (TRADITIONAL - NEEDS REFACTOR)
-- [ ] **TODO**: Implement Documentation Expert agent (TRADITIONAL - NEEDS REFACTOR)
-- [ ] **TODO**: Implement UI/UX Designer agent (TRADITIONAL - NEEDS REFACTOR)
-- [ ] **TODO**: Implement GitHub Specialist agent (TRADITIONAL - NEEDS REFACTOR)
-- [ ] **TODO**: Implement Workshopper agent (TRADITIONAL - NEEDS REFACTOR)
-- [ ] **TODO**: Implement Project Manager agent (TRADITIONAL - NEEDS REFACTOR)
+  - **NOTE**: REPLACED by 1.2.0 tasks above - use BaseAgent from Decision 83
+- [ ] **TODO**: Implement Backend Developer agent 
+- [ ] **TODO**: Implement Frontend Developer agent 
+- [ ] **TODO**: Implement QA Engineer agent 
+- [ ] **TODO**: Implement Security Expert agent 
+- [ ] **TODO**: Implement DevOps Engineer agent 
+- [ ] **TODO**: Implement Documentation Expert agent 
+- [ ] **TODO**: Implement UI/UX Designer agent 
+- [ ] **TODO**: Implement GitHub Specialist agent 
+- [ ] **TODO**: Implement Workshopper agent 
+- [ ] **TODO**: Implement Project Manager agent 
 
 ### 1.2.1 LLM Agent Architecture (FINAL - Based on Decisions)
 - [ ] **TODO**: Implement OpenAI-only LLM integration with per-agent model selection
