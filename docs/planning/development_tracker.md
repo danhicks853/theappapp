@@ -17,7 +17,7 @@ This document tracks all development tasks derived from our 6-phase planning. Ea
   - **Methods**: `assign_task()`, `route_message()`, `consult_specialist()`, `escalate_to_human()`, `update_state()`
   - **Acceptance**: Single orchestrator instance coordinates all agents, all communication flows through hub, agents cannot contact each other directly
   - **Test**: Unit tests verify hub-and-spoke enforcement, integration tests confirm message routing
-  - **Implementation Doc**: `docs/implementation/task-1-1-1-orchestrator-core.md`
+  - **Implementation Doc**: `docs/implementation/phase1/task-1-1-1-orchestrator-core.md`
   - **Test Coverage**: 39 unit tests + 10 integration tests + 2 comparison tests (51 total tests, ALL PASSING)
   - **Code Coverage**: 99% (154/154 statements, only 2 placeholder methods uncovered)
   - **Verification**: ✅ All tests passing ✅ 99% code coverage ✅ Hub-and-spoke pattern enforced ✅ All acceptance criteria met
