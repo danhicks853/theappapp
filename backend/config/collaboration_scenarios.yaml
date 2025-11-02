@@ -1,0 +1,329 @@
+# Collaboration Scenarios Catalog
+#
+# Defines the 6 standard collaboration scenarios with routing rules,
+# context requirements, and expected response formats.
+#
+# Reference: Decision 70 - Agent Collaboration Protocol
+
+scenarios:
+  # Scenario 1: Model/Data Questions
+  model_data:
+    name: "Model/Data Consultation"
+    description: "Questions about data models, schemas, or database design"
+    trigger_keywords:
+      - "model"
+      - "schema"
+      - "database"
+      - "table"
+      - "migration"
+      - "relationship"
+      - "foreign key"
+      - "data structure"
+    
+    routing_rules:
+      primary_specialist: "backend_developer"
+      fallback_specialists:
+        - "workshopper"
+        - "devops_engineer"
+      confidence_threshold: 0.7
+    
+    context_requirements:
+      required:
+        - "specific_question"
+        - "current_model_structure"
+      optional:
+        - "related_models"
+        - "use_case"
+        - "performance_concerns"
+      max_tokens: 800
+    
+    expected_response:
+      format: "structured_guidance"
+      should_include:
+        - "recommended_approach"
+        - "example_code"
+        - "considerations"
+        - "alternatives"
+      confidence_required: 0.7
+    
+    example_request:
+      question: "Should I use a foreign key or a junction table for this many-to-many relationship?"
+      context:
+        models: ["User", "Project", "Role"]
+        relationship: "Users can have multiple roles in multiple projects"
+
+  # Scenario 2: Security Review
+  security_review:
+    name: "Security Review & Consultation"
+    description: "Security concerns, vulnerability reviews, or authentication questions"
+    trigger_keywords:
+      - "security"
+      - "auth"
+      - "authentication"
+      - "authorization"
+      - "vulnerability"
+      - "injection"
+      - "xss"
+      - "csrf"
+      - "encrypt"
+      - "permission"
+    
+    routing_rules:
+      primary_specialist: "security_expert"
+      fallback_specialists:
+        - "backend_developer"
+      confidence_threshold: 0.85  # High confidence required for security
+    
+    context_requirements:
+      required:
+        - "specific_question"
+        - "relevant_code"
+        - "security_concern"
+      optional:
+        - "current_security_measures"
+        - "user_flow"
+        - "data_sensitivity"
+      max_tokens: 1000
+    
+    expected_response:
+      format: "security_assessment"
+      should_include:
+        - "risk_level"
+        - "vulnerabilities_found"
+        - "remediation_steps"
+        - "best_practices"
+        - "code_examples"
+      confidence_required: 0.8
+      requires_human_review: true  # Security issues should be human-reviewed
+    
+    example_request:
+      question: "Is this authentication flow vulnerable to CSRF attacks?"
+      context:
+        code: "def login(request): token = request.POST.get('token')"
+        concern: "No CSRF token validation"
+
+  # Scenario 3: API Design/Clarification
+  api_clarification:
+    name: "API Design & Clarification"
+    description: "Questions about API endpoints, request/response formats, or REST principles"
+    trigger_keywords:
+      - "api"
+      - "endpoint"
+      - "rest"
+      - "request"
+      - "response"
+      - "json"
+      - "status code"
+      - "route"
+      - "parameter"
+    
+    routing_rules:
+      primary_specialist: "backend_developer"
+      fallback_specialists:
+        - "frontend_developer"
+        - "workshopper"
+      confidence_threshold: 0.75
+    
+    context_requirements:
+      required:
+        - "specific_question"
+        - "api_purpose"
+      optional:
+        - "current_implementation"
+        - "frontend_needs"
+        - "expected_usage"
+      max_tokens: 800
+    
+    expected_response:
+      format: "api_specification"
+      should_include:
+        - "endpoint_design"
+        - "request_format"
+        - "response_format"
+        - "status_codes"
+        - "error_handling"
+      confidence_required: 0.75
+    
+    example_request:
+      question: "Should I use POST or PUT for updating a partial resource?"
+      context:
+        endpoint: "/api/users/{id}"
+        operation: "Update user email only"
+
+  # Scenario 4: Bug Debugging
+  bug_debugging:
+    name: "Bug Debugging Assistance"
+    description: "Help with debugging errors, unexpected behavior, or test failures"
+    trigger_keywords:
+      - "bug"
+      - "error"
+      - "exception"
+      - "crash"
+      - "failing"
+      - "not working"
+      - "unexpected"
+      - "debug"
+    
+    routing_rules:
+      primary_specialist: "qa_engineer"
+      fallback_specialists:
+        - "backend_developer"
+        - "frontend_developer"
+      confidence_threshold: 0.7
+    
+    context_requirements:
+      required:
+        - "specific_question"
+        - "error_message"
+        - "expected_behavior"
+        - "actual_behavior"
+      optional:
+        - "relevant_code"
+        - "steps_to_reproduce"
+        - "attempted_fixes"
+      max_tokens: 1000
+    
+    expected_response:
+      format: "debugging_guidance"
+      should_include:
+        - "root_cause_hypothesis"
+        - "debugging_steps"
+        - "potential_fixes"
+        - "testing_recommendations"
+      confidence_required: 0.7
+    
+    example_request:
+      question: "Why is my test failing with 'Connection refused'?"
+      context:
+        error: "ConnectionRefusedError: [Errno 111]"
+        test: "test_api_authentication"
+        expected: "200 OK"
+        actual: "Connection error"
+
+  # Scenario 5: Requirements Clarification
+  requirements:
+    name: "Requirements Clarification"
+    description: "Questions about feature requirements, user stories, or acceptance criteria"
+    trigger_keywords:
+      - "requirement"
+      - "feature"
+      - "user story"
+      - "acceptance criteria"
+      - "spec"
+      - "should it"
+      - "supposed to"
+      - "expected"
+    
+    routing_rules:
+      primary_specialist: "project_manager"
+      fallback_specialists:
+        - "workshopper"
+        - "uiux_designer"
+      confidence_threshold: 0.75
+    
+    context_requirements:
+      required:
+        - "specific_question"
+        - "feature_description"
+      optional:
+        - "user_perspective"
+        - "current_implementation"
+        - "related_features"
+      max_tokens: 600
+    
+    expected_response:
+      format: "requirements_clarification"
+      should_include:
+        - "clarified_requirement"
+        - "acceptance_criteria"
+        - "edge_cases"
+        - "user_scenarios"
+      confidence_required: 0.75
+    
+    example_request:
+      question: "Should the delete button show a confirmation dialog?"
+      context:
+        feature: "User deletion"
+        current: "Direct deletion without confirmation"
+
+  # Scenario 6: Infrastructure/Deployment
+  infrastructure:
+    name: "Infrastructure & Deployment"
+    description: "Questions about deployment, infrastructure, CI/CD, or environment setup"
+    trigger_keywords:
+      - "deploy"
+      - "infrastructure"
+      - "docker"
+      - "kubernetes"
+      - "ci/cd"
+      - "environment"
+      - "server"
+      - "hosting"
+      - "build"
+    
+    routing_rules:
+      primary_specialist: "devops_engineer"
+      fallback_specialists:
+        - "backend_developer"
+      confidence_threshold: 0.8
+    
+    context_requirements:
+      required:
+        - "specific_question"
+        - "infrastructure_component"
+      optional:
+        - "current_setup"
+        - "environment_details"
+        - "error_logs"
+      max_tokens: 900
+    
+    expected_response:
+      format: "infrastructure_guidance"
+      should_include:
+        - "recommended_solution"
+        - "configuration_steps"
+        - "best_practices"
+        - "monitoring_recommendations"
+      confidence_required: 0.8
+    
+    example_request:
+      question: "How should I configure database connection pooling for production?"
+      context:
+        environment: "Production"
+        database: "PostgreSQL"
+        framework: "FastAPI"
+
+# Workflow Execution Rules
+workflow_rules:
+  # Maximum time to wait for specialist response
+  timeout_seconds: 300  # 5 minutes
+  
+  # When to escalate to human
+  escalation_triggers:
+    - low_confidence: 0.5  # Below 50% confidence
+    - no_specialist_available: true
+    - security_critical: true
+    - multiple_failures: 3  # After 3 failed attempts
+  
+  # Response quality checks
+  response_validation:
+    min_length_chars: 50
+    must_include_reasoning: true
+    confidence_required: 0.6
+  
+  # Metrics tracking
+  track_metrics:
+    - response_time
+    - confidence_scores
+    - success_rate_by_scenario
+    - specialist_utilization
+
+# Collaboration Loop Prevention
+loop_detection:
+  enabled: true
+  max_cycles: 3
+  similarity_threshold: 0.85  # 85% semantic similarity = same question
+  actions_on_detection:
+    - create_gate: true
+    - notify_human: true
+    - record_loop_event: true

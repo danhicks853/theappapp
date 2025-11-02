@@ -170,6 +170,13 @@ class ApiClient {
     });
   }
 
+  async updateProject(id: string, data: Partial<Project>): Promise<Project> {
+    return this.request<Project>(`/api/v1/projects/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   // Task endpoints
   async executeTask(data: {
     goal: string;

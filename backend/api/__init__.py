@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Dict
 import os
 
-from backend.api.routes import settings, specialists, projects, tasks, store
+from backend.api.routes import settings, specialists, projects, tasks, store, gates, prompts
 from backend.api.dependencies import initialize_engine
 
 
@@ -47,6 +47,8 @@ def create_app() -> FastAPI:
 
     # Register routers
     app.include_router(settings.router)
+    app.include_router(gates.router)
+    app.include_router(prompts.router)
     app.include_router(store.router)  # TheAppApp App Store!
     app.include_router(specialists.router)
     app.include_router(projects.router)

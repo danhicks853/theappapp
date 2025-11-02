@@ -5,18 +5,21 @@ Endpoints for creating and managing custom AI specialists.
 
 Reference: MVP Demo Plan - Specialist Creation API
 """
+import logging
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.dependencies import get_db
-from backend.services.specialist_service import SpecialistService, Specialist
+from backend.services.specialist_service import SpecialistService
 from backend.services.openai_adapter import OpenAIAdapter
 from backend.services.rag_service import RAGService
+from backend.models.agent_types import validate_specialist_name, is_built_in_agent
 import os
 
 router = APIRouter(prefix="/api/v1/specialists", tags=["specialists"])
+logger = logging.getLogger(__name__)
 
 
 # Pydantic models
@@ -71,6 +74,17 @@ class GeneratePromptResponse(BaseModel):
     system_prompt: str
 
 
+class AIAssistRequest(BaseModel):
+    """Request model for AI assistant (flexible for UI use)."""
+    prompt: str = Field(..., description="User's request or description of what they want")
+    context: Optional[str] = Field(None, description="Optional context (current content, agent type, etc)")
+
+
+class AIAssistResponse(BaseModel):
+    """Response model for AI assistant."""
+    suggestion: str = Field(..., description="AI-generated suggestion or content")
+
+
 # Dependency to get specialist service
 def get_specialist_service():
     """Get specialist service with dependencies."""
@@ -95,6 +109,13 @@ async def create_specialist(
     - Web search configuration
     - Tool permissions
     """
+    # Validate name doesn't conflict with built-in agents
+    if not validate_specialist_name(specialist.name):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"The name '{specialist.name}' is reserved for a built-in agent. Please choose a different name."
+        )
+    
     try:
         created = await service.create_specialist(
             name=specialist.name,
@@ -191,6 +212,9 @@ def list_specialists(
                 "max_tokens": row[25] or 4000,
             })
         
+        # Filter out any specialists with built-in agent names (shouldn't exist but just in case)
+        specialists = [s for s in specialists if not is_built_in_agent(s["name"])]
+        
         return specialists
 
 
@@ -255,6 +279,67 @@ async def generate_prompt(
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ai-assist", response_model=AIAssistResponse)
+async def ai_assist(
+    request: AIAssistRequest,
+    service: SpecialistService = Depends(get_specialist_service)
+):
+    """
+    Flexible AI assistant endpoint for UI help.
+    
+    This endpoint is designed to be used throughout the UI wherever users
+    need AI assistance. It takes a simple prompt and optional context.
+    
+    Use cases:
+    - Prompt editing assistance
+    - Content generation
+    - Text improvement suggestions
+    - Writing help
+    
+    Example requests:
+    - "Add error handling guidelines"
+    - "Make this more concise"
+    - "Add examples for API usage"
+    """
+    try:
+        if not service.openai:
+            raise HTTPException(
+                status_code=503,
+                detail="AI service not configured. Please set OPENAI_API_KEY."
+            )
+        
+        # Build messages for AI
+        system_content = """You are a helpful AI assistant specializing in writing clear, 
+comprehensive technical content. You help users improve prompts, documentation, and 
+guidelines for AI agents. Provide direct, actionable suggestions."""
+        
+        user_content = request.prompt
+        if request.context:
+            user_content = f"Context: {request.context}\n\nRequest: {request.prompt}"
+        
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content}
+        ]
+        
+        response = await service.openai.chat_completion(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=2000
+        )
+        
+        suggestion = response.choices[0].message.content.strip()
+        
+        return AIAssistResponse(suggestion=suggestion)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"AI assist error: {e}")
+        raise HTTPException(status_code=500, detail=f"AI assistance failed: {str(e)}")
 
 
 @router.delete("/{specialist_id}", status_code=204)

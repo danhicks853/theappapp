@@ -3,12 +3,14 @@
  * Create and manage projects with assigned specialists
  */
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, Project, Specialist } from '../services/api';
 
 const getAvatarUrl = (seed: string) =>
   `https://api.dicebear.com/7.x/avataaars/svg?seed=${seed}`;
 
 export default function Projects() {
+  const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [specialists, setSpecialists] = useState<Specialist[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,6 +86,28 @@ export default function Projects() {
     return specialists.filter(s => ids.includes(s.id));
   };
 
+  // Mock last activity data - will be replaced with real API data
+  const getLastActivity = (specialistId: string, projectId: string) => {
+    const activities = [
+      'Created authentication module',
+      'Fixed bug in payment flow',
+      'Updated API documentation',
+      'Reviewed pull request',
+      'Deployed to staging',
+      'Refactored database queries',
+      'Added unit tests',
+      'Updated dependencies',
+    ];
+    const times = ['2m ago', '15m ago', '1h ago', '3h ago', 'Yesterday'];
+    
+    // Generate consistent mock data based on IDs
+    const index = (specialistId + projectId).split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return {
+      action: activities[index % activities.length],
+      time: times[index % times.length]
+    };
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-8">
       <div className="max-w-7xl mx-auto">
@@ -148,19 +172,43 @@ export default function Projects() {
                     {project.description}
                   </p>
 
-                  {/* Specialists */}
+                  {/* Specialists with Last Activity */}
                   <div className="mb-4">
                     <p className="text-xs text-blue-300 mb-2">Team:</p>
                     <div className="flex -space-x-2">
-                      {projectSpecialists.slice(0, 5).map(specialist => (
-                        <img
-                          key={specialist.id}
-                          src={getAvatarUrl(specialist.avatar || specialist.id)}
-                          alt={specialist.display_name || specialist.name}
-                          title={specialist.display_name || specialist.name}
-                          className="w-8 h-8 rounded-full border-2 border-white"
-                        />
-                      ))}
+                      {projectSpecialists.slice(0, 5).map(specialist => {
+                        const lastActivity = getLastActivity(specialist.id, project.id);
+                        return (
+                          <div key={specialist.id} className="relative group">
+                            <img
+                              src={getAvatarUrl(specialist.avatar || specialist.id)}
+                              alt={specialist.display_name || specialist.name}
+                              className="w-8 h-8 rounded-full border-2 border-white hover:border-blue-400 transition-all cursor-pointer hover:scale-110 hover:z-10"
+                            />
+                            {/* Activity indicator - small green dot */}
+                            <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-green-400 rounded-full border border-slate-800"></div>
+                            
+                            {/* Tooltip with last activity */}
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-20 w-48">
+                              <div className="bg-slate-900 text-white text-xs rounded-lg p-3 shadow-xl border border-slate-700">
+                                <div className="font-bold text-blue-400 mb-1">
+                                  {specialist.display_name || specialist.name}
+                                </div>
+                                <div className="text-slate-300 mb-1">
+                                  {lastActivity.action}
+                                </div>
+                                <div className="text-slate-500 text-[10px]">
+                                  {lastActivity.time}
+                                </div>
+                                {/* Tooltip arrow */}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px">
+                                  <div className="border-4 border-transparent border-t-slate-900"></div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                       {projectSpecialists.length > 5 && (
                         <div className="w-8 h-8 rounded-full border-2 border-white bg-gray-200 flex items-center justify-center text-xs text-gray-600">
                           +{projectSpecialists.length - 5}
@@ -170,7 +218,10 @@ export default function Projects() {
                   </div>
 
                   {/* View Button */}
-                  <button className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 font-medium shadow-md">
+                  <button 
+                    onClick={() => navigate(`/projects/${project.id}`)}
+                    className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 font-medium shadow-md"
+                  >
                     View Project
                   </button>
                 </div>

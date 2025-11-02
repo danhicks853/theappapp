@@ -8,7 +8,7 @@ Reference: MVP Demo Plan - Project Management
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.engine import Connection
 
 from backend.api.dependencies import get_db
 from backend.services.project_service import ProjectService
@@ -49,9 +49,9 @@ def get_project_service():
 
 
 @router.post("", response_model=ProjectResponse, status_code=201)
-async def create_project(
+def create_project(
     project: ProjectCreate,
-    db: AsyncSession = Depends(get_db),
+    db: Connection = Depends(get_db),
     service: ProjectService = Depends(get_project_service)
 ):
     """
@@ -62,7 +62,7 @@ async def create_project(
     in project scope and specialist expertise.
     """
     try:
-        created = await service.create_project(
+        created = service.create_project(
             name=project.name,
             description=project.description,
             specialist_ids=project.specialist_ids,
@@ -76,9 +76,9 @@ async def create_project(
 
 
 @router.get("", response_model=List[ProjectResponse])
-async def list_projects(
+def list_projects(
     status: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    db: Connection = Depends(get_db),
     service: ProjectService = Depends(get_project_service)
 ):
     """
@@ -87,18 +87,18 @@ async def list_projects(
     Query parameters:
     - status: Filter by 'active', 'completed', or 'archived'
     """
-    projects = await service.list_projects(status=status, db=db)
+    projects = service.list_projects(status=status, db=db)
     return [ProjectResponse(**p.__dict__) for p in projects]
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-async def get_project(
+def get_project(
     project_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: Connection = Depends(get_db),
     service: ProjectService = Depends(get_project_service)
 ):
     """Get a specific project by ID."""
-    project = await service.get_project(project_id, db)
+    project = service.get_project(project_id, db)
     
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -107,10 +107,10 @@ async def get_project(
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
-async def update_project(
+def update_project(
     project_id: str,
     updates: ProjectUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: Connection = Depends(get_db),
     service: ProjectService = Depends(get_project_service)
 ):
     """
@@ -125,7 +125,7 @@ async def update_project(
     if not update_dict:
         raise HTTPException(status_code=400, detail="No fields to update")
     
-    updated = await service.update_project(project_id, update_dict, db)
+    updated = service.update_project(project_id, update_dict, db)
     
     if not updated:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -134,9 +134,9 @@ async def update_project(
 
 
 @router.get("/{project_id}/specialists", response_model=List[str])
-async def get_project_specialists(
+def get_project_specialists(
     project_id: str,
-    db: AsyncSession = Depends(get_db),
+    db: Connection = Depends(get_db),
     service: ProjectService = Depends(get_project_service)
 ):
     """
@@ -145,9 +145,9 @@ async def get_project_specialists(
     Read-only - specialists cannot be modified after project creation.
     """
     # Verify project exists
-    project = await service.get_project(project_id, db)
+    project = service.get_project(project_id, db)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    specialist_ids = await service.get_project_specialists(project_id, db)
+    specialist_ids = service.get_project_specialists(project_id, db)
     return specialist_ids

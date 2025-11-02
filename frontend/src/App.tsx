@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router-do
 import Store from "./pages/Store";
 import Team from "./pages/Team";
 import Projects from "./pages/Projects";
+import ProjectDetail from "./pages/ProjectDetail";
 import Settings from "./pages/Settings";
 
 function Navigation() {
@@ -112,6 +113,7 @@ function App() {
             <Route path="/store" element={<Store />} />
             <Route path="/team" element={<Team />} />
             <Route path="/projects" element={<Projects />} />
+            <Route path="/projects/:projectId" element={<ProjectDetail />} />
             <Route path="/settings" element={<Settings />} />
           </Routes>
         </div>

@@ -730,6 +730,314 @@ class Orchestrator:
         )
         return gate_id
     
+    async def escalate_to_specialist(
+        self,
+        requesting_agent_id: str,
+        question: str,
+        context: Dict[str, Any],
+        *,
+        urgency: str = "normal",
+        suggested_specialist: Optional[AgentType] = None
+    ) -> Dict[str, Any]:
+        """
+        Full escalation workflow: route to specialist, deliver response.
+        
+        This combines collaboration routing with urgency analysis and response
+        tracking. Implements the complete agent-to-agent help flow.
+        
+        Args:
+            requesting_agent_id: ID of agent requesting help
+            question: The specific question or request
+            context: Relevant context (error details, code snippets, etc.)
+            urgency: "low", "normal", "high", "critical"
+            suggested_specialist: Optional hint about which specialist to use
+        
+        Returns:
+            Dict with escalation_id, selected_specialist, response, outcome
+        
+        Example:
+            result = await orchestrator.escalate_to_specialist(
+                requesting_agent_id="backend-1",
+                question="How do I handle this authentication error?",
+                context={"error": "InvalidToken", "code_location": "auth.py:42"},
+                urgency="high"
+            )
+        """
+        escalation_id = str(uuid.uuid4())
+        
+        self.logger.info(
+            "Escalation started | escalation_id=%s | from=%s | urgency=%s",
+            escalation_id,
+            requesting_agent_id,
+            urgency
+        )
+        
+        # 1. Analyze question and determine specialist types
+        specialist_types = self._analyze_question_for_specialists(
+            question, suggested_specialist
+        )
+        
+        # 2. Build help request structure
+        help_request = {
+            "escalation_id": escalation_id,
+            "requesting_agent_id": requesting_agent_id,
+            "question": question,
+            "context": context,
+            "urgency": urgency,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+        
+        # 3. Route to best available specialist
+        routing_result = self.route_collaboration(
+            help_request=help_request,
+            specialist_types=specialist_types
+        )
+        
+        selected_specialist_id = routing_result.get("selected_agent")
+        
+        if not selected_specialist_id:
+            # No specialist available - escalate to human gate
+            self.logger.warning(
+                "No specialist available | escalation_id=%s | creating gate",
+                escalation_id
+            )
+            
+            gate_id = await self.create_gate(
+                reason="Specialist assistance needed but none available",
+                context={
+                    "escalation_id": escalation_id,
+                    "question": question,
+                    "requesting_agent": requesting_agent_id,
+                    "context": context
+                },
+                agent_id=requesting_agent_id
+            )
+            
+            return {
+                "escalation_id": escalation_id,
+                "status": "escalated_to_human",
+                "gate_id": gate_id,
+                "specialist": None,
+                "response": None,
+                "reasoning": "No specialists available, created human gate"
+            }
+        
+        # 4. Log the escalation decision
+        await self.log_decision(
+            decision_type="specialist_escalation",
+            reasoning=f"Question analysis suggests {routing_result.get('agent_type')} expertise",
+            decision={
+                "action": "escalate_to_specialist",
+                "escalation_id": escalation_id,
+                "specialist_id": selected_specialist_id,
+                "specialist_type": routing_result.get("agent_type"),
+                "urgency": urgency,
+                "question_preview": question[:100]
+            },
+            confidence=0.85,
+            rag_context=None
+        )
+        
+        # 5. Curate context for specialist (only send relevant parts)
+        curated_context = self._curate_context_for_specialist(
+            context, routing_result.get("agent_type")
+        )
+        
+        # 6. Deliver request to specialist
+        # Note: In real implementation, this would send via message queue or agent interface
+        specialist_payload = {
+            "type": "help_request",
+            "escalation_id": escalation_id,
+            "from_agent": requesting_agent_id,
+            "question": question,
+            "context": curated_context,
+            "urgency": urgency
+        }
+        
+        self.logger.info(
+            "Request delivered to specialist | escalation_id=%s | specialist=%s",
+            escalation_id,
+            selected_specialist_id
+        )
+        
+        # 7. Track the collaboration
+        # TODO: Persist to collaboration_requests table (Decision 70)
+        # For now, store in memory
+        if not hasattr(self, '_active_escalations'):
+            self._active_escalations = {}
+        
+        self._active_escalations[escalation_id] = {
+            "escalation_id": escalation_id,
+            "requesting_agent": requesting_agent_id,
+            "specialist": selected_specialist_id,
+            "specialist_type": routing_result.get("agent_type"),
+            "question": question,
+            "context": context,
+            "urgency": urgency,
+            "status": "awaiting_response",
+            "created_at": datetime.now(UTC),
+            "payload": specialist_payload
+        }
+        
+        return {
+            "escalation_id": escalation_id,
+            "status": "routed_to_specialist",
+            "specialist_id": selected_specialist_id,
+            "specialist_type": routing_result.get("agent_type"),
+            "urgency": urgency,
+            "reasoning": routing_result.get("reasoning"),
+            "awaiting_response": True
+        }
+    
+    def _analyze_question_for_specialists(
+        self,
+        question: str,
+        suggested_specialist: Optional[AgentType] = None
+    ) -> List[AgentType]:
+        """
+        Analyze question content to suggest specialist types.
+        
+        Uses keyword matching to determine which specialists might help.
+        Orchestrator can override the suggested_specialist if inappropriate.
+        """
+        question_lower = question.lower()
+        
+        # Keyword-based routing (simple for now, can be enhanced with LLM)
+        if any(word in question_lower for word in ['security', 'auth', 'vulnerability', 'permission', 'xss', 'sql injection']):
+            return [AgentType.SECURITY_EXPERT, AgentType.BACKEND_DEVELOPER]
+        
+        elif any(word in question_lower for word in ['deploy', 'docker', 'infrastructure', 'ci/cd', 'kubernetes']):
+            return [AgentType.DEVOPS_ENGINEER, AgentType.BACKEND_DEVELOPER]
+        
+        elif any(word in question_lower for word in ['api', 'database', 'backend', 'server', 'endpoint']):
+            return [AgentType.BACKEND_DEVELOPER, AgentType.DEVOPS_ENGINEER]
+        
+        elif any(word in question_lower for word in ['ui', 'frontend', 'react', 'component', 'css', 'styling']):
+            return [AgentType.FRONTEND_DEVELOPER, AgentType.UI_UX_DESIGNER]
+        
+        elif any(word in question_lower for word in ['test', 'qa', 'bug', 'quality']):
+            return [AgentType.QA_ENGINEER, AgentType.BACKEND_DEVELOPER]
+        
+        elif any(word in question_lower for word in ['documentation', 'readme', 'docs', 'guide']):
+            return [AgentType.DOCUMENTATION_EXPERT]
+        
+        elif any(word in question_lower for word in ['git', 'github', 'pull request', 'commit', 'branch']):
+            return [AgentType.GITHUB_SPECIALIST]
+        
+        elif suggested_specialist:
+            # Use suggestion if provided and no keywords matched
+            return [suggested_specialist]
+        
+        else:
+            # Default: try backend dev and workshopper as generalists
+            return [AgentType.BACKEND_DEVELOPER, AgentType.WORKSHOPPER]
+    
+    def _curate_context_for_specialist(
+        self,
+        context: Dict[str, Any],
+        specialist_type: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Filter context to only send relevant information to specialist.
+        
+        Prevents overwhelming specialists with unnecessary context.
+        """
+        # For now, pass most context through, but limit sizes
+        curated = {}
+        
+        for key, value in context.items():
+            # Limit string lengths
+            if isinstance(value, str) and len(value) > 1000:
+                curated[key] = value[:1000] + "... (truncated)"
+            # Limit list lengths
+            elif isinstance(value, list) and len(value) > 10:
+                curated[key] = value[:10] + ["... (truncated)"]
+            else:
+                curated[key] = value
+        
+        return curated
+    
+    async def deliver_specialist_response(
+        self,
+        escalation_id: str,
+        response: str,
+        specialist_id: str,
+        *,
+        confidence: float = 0.8,
+        additional_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Deliver specialist's response back to requesting agent.
+        
+        Args:
+            escalation_id: ID of the escalation
+            response: Specialist's answer/guidance
+            specialist_id: ID of responding specialist
+            confidence: Specialist's confidence in their response (0-1)
+            additional_context: Optional additional context from specialist
+        
+        Returns:
+            Outcome dict with delivery status
+        """
+        if not hasattr(self, '_active_escalations'):
+            self._active_escalations = {}
+        
+        escalation = self._active_escalations.get(escalation_id)
+        
+        if not escalation:
+            self.logger.warning(
+                "Unknown escalation | escalation_id=%s",
+                escalation_id
+            )
+            return {
+                "status": "error",
+                "message": "Escalation not found"
+            }
+        
+        requesting_agent_id = escalation["requesting_agent"]
+        
+        self.logger.info(
+            "Delivering response | escalation_id=%s | to=%s | confidence=%.2f",
+            escalation_id,
+            requesting_agent_id,
+            confidence
+        )
+        
+        # Update escalation status
+        escalation["status"] = "completed"
+        escalation["response"] = response
+        escalation["specialist_confidence"] = confidence
+        escalation["completed_at"] = datetime.now(UTC)
+        
+        # Record the outcome
+        # TODO: Persist to collaboration_outcomes table (Decision 70)
+        
+        # Log the outcome
+        await self.log_decision(
+            decision_type="collaboration_outcome",
+            reasoning=f"Specialist provided response with {confidence:.0%} confidence",
+            decision={
+                "action": "deliver_response",
+                "escalation_id": escalation_id,
+                "specialist_id": specialist_id,
+                "requesting_agent": requesting_agent_id,
+                "confidence": confidence,
+                "response_length": len(response)
+            },
+            confidence=confidence,
+            rag_context=None
+        )
+        
+        return {
+            "status": "delivered",
+            "escalation_id": escalation_id,
+            "requesting_agent": requesting_agent_id,
+            "specialist": specialist_id,
+            "response": response,
+            "confidence": confidence,
+            "outcome": "success"
+        }
+    
     def update_state(
         self,
         phase: Optional[str] = None,

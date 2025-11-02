@@ -9,10 +9,9 @@ import logging
 import uuid
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
-from datetime import datetime
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.engine import Connection
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +43,12 @@ class ProjectService:
         """Initialize project service."""
         logger.info("Project service initialized")
     
-    async def create_project(
+    def create_project(
         self,
         name: str,
         description: str,
         specialist_ids: List[str],
-        db: AsyncSession
+        db: Connection
     ) -> Project:
         """
         Create a new project with specialist assignments.
@@ -74,7 +73,7 @@ class ProjectService:
             RETURNING id, name, description, status, created_at, updated_at
         """)
         
-        result = await db.execute(query, {
+        result = db.execute(query, {
             "id": project_id,
             "name": name,
             "description": description
@@ -89,19 +88,19 @@ class ProjectService:
                     INSERT INTO project_specialists (project_id, specialist_id, created_at)
                     VALUES (:project_id, :specialist_id, NOW())
                 """)
-                await db.execute(bind_query, {
+                db.execute(bind_query, {
                     "project_id": project_id,
                     "specialist_id": specialist_id
                 })
         
-        await db.commit()
+        db.commit()
         
         project = self._row_to_project(row, specialist_ids)
         logger.info(f"Project created: {project_id} with {len(specialist_ids)} specialists")
         
         return project
     
-    async def get_project(self, project_id: str, db: AsyncSession) -> Optional[Project]:
+    def get_project(self, project_id: str, db: Connection) -> Optional[Project]:
         """Get project by ID with specialist assignments."""
         query = text("""
             SELECT p.id, p.name, p.description, p.status, p.created_at, p.updated_at
@@ -109,7 +108,7 @@ class ProjectService:
             WHERE p.id = :id
         """)
         
-        result = await db.execute(query, {"id": project_id})
+        result = db.execute(query, {"id": project_id})
         row = result.first()
         
         if not row:
@@ -122,15 +121,15 @@ class ProjectService:
             WHERE project_id = :project_id
         """)
         
-        specialists_result = await db.execute(specialists_query, {"project_id": project_id})
+        specialists_result = db.execute(specialists_query, {"project_id": project_id})
         specialist_ids = [str(r[0]) for r in specialists_result.fetchall()]
         
         return self._row_to_project(row, specialist_ids)
     
-    async def list_projects(
+    def list_projects(
         self,
         status: Optional[str] = None,
-        db: AsyncSession = None
+        db: Connection = None
     ) -> List[Project]:
         """
         List projects with optional status filtering.
@@ -174,11 +173,11 @@ class ProjectService:
         logger.info(f"Listed {len(projects)} projects")
         return projects
     
-    async def update_project(
+    def update_project(
         self,
         project_id: str,
         updates: Dict[str, Any],
-        db: AsyncSession
+        db: Connection
     ) -> Optional[Project]:
         """
         Update project details (name, description, status).
@@ -203,7 +202,7 @@ class ProjectService:
                 params[field] = updates[field]
         
         if not set_parts:
-            return await self.get_project(project_id, db)
+            return self.get_project(project_id, db)
         
         set_clause = ", ".join(set_parts)
         
@@ -214,8 +213,8 @@ class ProjectService:
             RETURNING id, name, description, status, created_at, updated_at
         """)
         
-        result = await db.execute(query, params)
-        await db.commit()
+        result = db.execute(query, params)
+        db.commit()
         
         row = result.first()
         if not row:
@@ -228,16 +227,16 @@ class ProjectService:
             WHERE project_id = :project_id
         """)
         
-        specialists_result = await db.execute(specialists_query, {"project_id": project_id})
+        specialists_result = db.execute(specialists_query, {"project_id": project_id})
         specialist_ids = [str(r[0]) for r in specialists_result.fetchall()]
         
         logger.info(f"Project updated: {project_id}")
         return self._row_to_project(row, specialist_ids)
     
-    async def get_project_specialists(
+    def get_project_specialists(
         self,
         project_id: str,
-        db: AsyncSession
+        db: Connection
     ) -> List[str]:
         """
         Get list of specialist IDs assigned to project.
@@ -256,7 +255,7 @@ class ProjectService:
             ORDER BY created_at
         """)
         
-        result = await db.execute(query, {"project_id": project_id})
+        result = db.execute(query, {"project_id": project_id})
         specialist_ids = [str(r[0]) for r in result.fetchall()]
         
         return specialist_ids

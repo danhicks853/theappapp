@@ -15,7 +15,9 @@ from backend.services.store_service import StoreService
 from backend.services.specialist_service import SpecialistService
 from backend.services.openai_adapter import OpenAIAdapter
 from backend.services.rag_service import RAGService
+from backend.models.agent_types import is_built_in_agent
 import os
+import json
 
 router = APIRouter(prefix="/api/v1/store", tags=["store"])
 
@@ -98,8 +100,12 @@ def list_store_specialists(
         except Exception:
             pass  # If error, just show all templates
     
-    # Filter out already installed templates
-    available_templates = [t for t in templates if t.template_id not in installed_template_ids]
+    # Filter out already installed templates AND built-in agent names
+    available_templates = [
+        t for t in templates 
+        if t.template_id not in installed_template_ids
+        and not is_built_in_agent(t.name)  # Exclude built-in agent names
+    ]
     
     return [TemplateResponse(**template.__dict__) for template in available_templates]
 
@@ -183,10 +189,16 @@ def install_specialist(
                         status, tags, model, temperature, max_tokens, required
                     ) VALUES (
                         :id, :name, :description, :system_prompt, :scope,
-                        :web_search_enabled, :web_search_config, :tools_enabled,
+                        :web_search_enabled, 
+                        CAST(:web_search_config AS JSONB), 
+                        CAST(:tools_enabled AS JSONB),
                         :version, :template_id, :installed_from_store,
-                        :display_name, :avatar, :bio, :interests, :favorite_tool, :quote,
-                        :status, :tags, :model, :temperature, :max_tokens, :required
+                        :display_name, :avatar, :bio, 
+                        CAST(:interests AS JSONB), 
+                        :favorite_tool, :quote,
+                        :status, 
+                        CAST(:tags AS JSONB), 
+                        :model, :temperature, :max_tokens, :required
                     )
                 """),
                 {
@@ -196,19 +208,19 @@ def install_specialist(
                     "system_prompt": install_data["system_prompt"],
                     "scope": install_data.get("scope", "global"),
                     "web_search_enabled": install_data.get("web_search_enabled", False),
-                    "web_search_config": install_data.get("web_search_config"),
-                    "tools_enabled": install_data.get("tools_enabled"),
+                    "web_search_config": json.dumps(install_data.get("web_search_config")) if install_data.get("web_search_config") else None,
+                    "tools_enabled": json.dumps(install_data.get("tools_enabled")) if install_data.get("tools_enabled") else None,
                     "version": install_data["version"],
                     "template_id": install_data["template_id"],
                     "installed_from_store": True,
                     "display_name": install_data["display_name"],
                     "avatar": install_data["avatar"],
                     "bio": install_data["bio"],
-                    "interests": install_data.get("interests", []),
+                    "interests": json.dumps(install_data.get("interests", [])),
                     "favorite_tool": install_data["favorite_tool"],
                     "quote": install_data["quote"],
                     "status": "active",
-                    "tags": install_data.get("tags", []),
+                    "tags": json.dumps(install_data.get("tags", [])),
                     "model": install_data.get("model", "gpt-4"),
                     "temperature": float(install_data.get("temperature", 0.7)),
                     "max_tokens": int(install_data.get("max_tokens", 4000)),
