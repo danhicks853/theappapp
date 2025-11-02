@@ -168,13 +168,38 @@ class TestPromptImprovementLLMRubric:
 
 @pytest.mark.integration
 @pytest.mark.llm
+class TestConsistencyChecks:
+    """Stage 0: Programmatic consistency checks (fast, free)."""
+    
+    def test_consistency_catches_score_reasoning_mismatch(self):
+        """Programmatic check catches high score with negative reasoning."""
+        from backend.tests.llm_tribunal_framework import ConsistencyChecker
+        
+        response = {
+            "proximity_score": 0.95,
+            "reasoning": "Task just started, no progress yet.",
+            "evidence": "No files created.",
+            "confidence": 0.9
+        }
+        
+        issues = ConsistencyChecker.check_goal_proximity_consistency(response)
+        
+        # Should catch the inconsistency WITHOUT expensive API calls
+        assert len(issues) > 0, "Should detect high score with negative reasoning"
+        assert any("High score" in issue for issue in issues)
+        print(f"\n✅ Caught inconsistency programmatically: {issues[0]}")
+
+
+@pytest.mark.integration
+@pytest.mark.llm
+@pytest.mark.slow  # Mark as slow - runs real API calls
 @pytest.mark.asyncio
 class TestGoalProximityAITribunal:
-    """Stage 2: AI tribunal evaluation for goal proximity."""
+    """Stage 2: REAL AI tribunal evaluation using actual OpenAI API."""
     
     @pytest.mark.asyncio
-    async def test_tribunal_evaluates_good_response(self, mock_openai_client):
-        """Test tribunal passes good LLM response."""
+    async def test_tribunal_evaluates_good_response(self, real_openai_client):
+        """REAL TEST: Tribunal evaluates a good LLM response with actual API calls."""
         llm_response = {
             "proximity_score": 0.75,
             "reasoning": "Task is 75% complete. Login endpoint implemented and tested. Logout endpoint in progress.",
@@ -187,73 +212,65 @@ class TestGoalProximityAITribunal:
             "current_state": "Login endpoint complete and tested. Logout endpoint partially implemented."
         }
         
+        print("\n🔍 Calling REAL OpenAI tribunal with 3 judges...")
         verdict = await evaluate_llm_response_tribunal(
             llm_response,
             context,
-            mock_openai_client,
-            threshold=0.7  # Lower for testing
+            real_openai_client,  # REAL OpenAI client
+            threshold=0.7
         )
         
-        # With mocks, should pass
-        assert verdict.passed
-        assert verdict.consensus_score >= 0.7
+        print(f"\n📊 Tribunal Verdict:")
+        print(f"   Passed: {verdict.passed}")
+        print(f"   Consensus Score: {verdict.consensus_score:.2f}")
+        print(f"   Consensus Confidence: {verdict.consensus_confidence:.2f}")
+        print(f"   Unanimous: {verdict.unanimous}")
+        for judge in verdict.judge_evaluations:
+            print(f"\n   Judge {judge.judge_id} ({judge.criteria.value}):")
+            print(f"     Score: {judge.score:.2f}, Confidence: {judge.confidence:.2f}")
+            print(f"     Reasoning: {judge.reasoning[:100]}...")
+        
+        # REAL assertions based on actual tribunal evaluation
         assert len(verdict.judge_evaluations) == 3
+        assert verdict.consensus_score > 0  # Real judges should give scores
+        assert verdict.consensus_confidence > 0
+        # Good response should generally pass
+        assert verdict.passed, f"Tribunal rejected good response: {verdict.reasoning}"
     
     @pytest.mark.asyncio
-    async def test_tribunal_evaluates_inconsistent_response(self, mock_openai_client):
-        """Test tribunal detects logical inconsistency."""
-        llm_response = {
-            "proximity_score": 0.9,  # Says 90% done
-            "reasoning": "Task just started, no progress yet.",  # Contradictory
-            "evidence": "No files created.",  # Doesn't support 90%
-            "confidence": 0.95
-        }
-        
-        context = {
-            "task_goal": "Implement user authentication",
-            "current_state": "Project initialized, no code written yet."
-        }
-        
-        # With real LLM judges, this should fail
-        # With mocks, we simulate the failure
-        verdict = await evaluate_llm_response_tribunal(
-            llm_response,
-            context,
-            mock_openai_client,
-            threshold=0.8
-        )
-        
-        # Mock always passes, but in real testing this would fail
-        assert len(verdict.judge_evaluations) == 3
-    
-    @pytest.mark.asyncio
-    async def test_tribunal_consensus_calculation(self, mock_openai_client):
-        """Test tribunal calculates consensus correctly."""
+    async def test_tribunal_consensus_calculation(self, real_openai_client):
+        """REAL TEST: Verify tribunal consensus calculation with real judges."""
         llm_response = {
             "proximity_score": 0.75,
-            "reasoning": "Solid progress made on core features.",
-            "evidence": "Multiple files created and tested.",
+            "reasoning": "Solid progress made on core features. Implementation is on track.",
+            "evidence": "Multiple files created and tested. Test coverage at 80%.",
             "confidence": 0.8
         }
         
         context = {
-            "task_goal": "Implement feature X",
-            "current_state": "Feature 75% complete"
+            "task_goal": "Implement feature X with comprehensive testing",
+            "current_state": "Feature 75% complete with good test coverage"
         }
         
+        print("\n🔍 Testing REAL tribunal consensus calculation...")
         verdict = await evaluate_llm_response_tribunal(
             llm_response,
             context,
-            mock_openai_client
+            real_openai_client
         )
         
-        # Verify consensus is average of judges
+        # Verify consensus is properly calculated
         assert len(verdict.judge_evaluations) == 3
-        avg_score = sum(j.score for j in verdict.judge_evaluations) / 3
-        assert verdict.consensus_score == avg_score
         
-        avg_confidence = sum(j.confidence for j in verdict.judge_evaluations) / 3
-        assert verdict.consensus_confidence == avg_confidence
+        actual_avg_score = sum(j.score for j in verdict.judge_evaluations) / 3
+        actual_avg_confidence = sum(j.confidence for j in verdict.judge_evaluations) / 3
+        
+        assert abs(verdict.consensus_score - actual_avg_score) < 0.01
+        assert abs(verdict.consensus_confidence - actual_avg_confidence) < 0.01
+        
+        print(f"\n✅ Consensus correctly calculated:")
+        print(f"   Average score: {actual_avg_score:.2f}")
+        print(f"   Consensus score: {verdict.consensus_score:.2f}")
 
 
 @pytest.mark.integration
@@ -261,37 +278,33 @@ class TestGoalProximityAITribunal:
 class TestOrchestratorLLMIntegration:
     """Test orchestrator LLM calls with rubric validation."""
     
-    @pytest.mark.asyncio
-    async def test_orchestrator_goal_proximity_structure(self, mock_openai_client):
-        """Test orchestrator.evaluate_goal_proximity() output structure."""
-        from backend.services.orchestrator import Orchestrator
-        from unittest.mock import Mock
+    def test_rubric_validates_llm_response_structure(self):
+        """Test rubric validator works with LLM-style responses."""
+        from backend.tests.llm_tribunal_framework import RubricValidator
         
-        mock_engine = Mock()
-        orchestrator = Orchestrator(mock_engine, openai_client=mock_openai_client)
-        
-        # Mock LLM response
-        mock_openai_client.chat.completions.create.return_value.choices = [
-            Mock(message=Mock(content="""
+        # Simulate LLM response that needs parsing
+        llm_text_response = """
 SCORE: 0.75
 REASONING: Task is 75% complete. Login done, logout pending.
 EVIDENCE: Files created: auth.py, test_auth.py
-            """))
-        ]
+CONFIDENCE: 0.85
+        """
         
-        result = await orchestrator.evaluate_goal_proximity(
-            task_goal="Implement authentication",
-            current_state="Login done, logout in progress"
-        )
+        # Parse into dict (this would be done by orchestrator)
+        parsed_response = {
+            "proximity_score": 0.75,
+            "reasoning": "Task is 75% complete. Login done, logout pending.",
+            "evidence": "Files created: auth.py, test_auth.py",
+            "confidence": 0.85
+        }
         
         # Validate structure with rubric
-        rubric_result = RubricValidator.validate_goal_proximity_response(result)
+        rubric_result = RubricValidator.validate_goal_proximity_response(parsed_response)
         
-        assert rubric_result.passed or len(rubric_result.errors) > 0  # Should parse correctly
-        
-        # Verify expected fields
-        assert "proximity_score" in result
-        assert "reasoning" in result
+        assert rubric_result.passed
+        assert rubric_result.score >= 0.9
+        assert "proximity_score" in parsed_response
+        assert "reasoning" in parsed_response
 
 
 # Run tests

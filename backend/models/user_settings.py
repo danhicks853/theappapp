@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class AutonomyLevel(str, Enum):
@@ -23,7 +23,8 @@ class UserSettings(BaseModel):
         description="Orchestrator autonomy preference",
     )
 
-    @validator("autonomy_level", pre=True)
+    @field_validator("autonomy_level", mode="before")
+    @classmethod
     def _normalize_level(cls, value: str | AutonomyLevel) -> AutonomyLevel:
         if isinstance(value, AutonomyLevel):
             return value

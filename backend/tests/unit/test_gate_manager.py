@@ -14,9 +14,12 @@ class TestGateManager:
     
     def setup_method(self):
         """Set up test fixtures."""
-        self.mock_engine = Mock()
-        self.mock_conn = Mock()
+        from unittest.mock import MagicMock
+        
+        self.mock_engine = MagicMock()
+        self.mock_conn = MagicMock()
         self.mock_engine.connect.return_value.__enter__.return_value = self.mock_conn
+        self.mock_engine.connect.return_value.__exit__.return_value = None
         
         self.gate_manager = GateManager(self.mock_engine)
     

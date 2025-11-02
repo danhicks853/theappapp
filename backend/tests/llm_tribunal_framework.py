@@ -1,489 +1,720 @@
 """
-LLM Tribunal Testing Framework
+LLM Tribunal Testing Framework - Production-Hardened Implementation
 
-Implements two-stage LLM testing per Decision 72:
-- Stage 1: Rubric Validation (fast, deterministic)
-- Stage 2: AI Panel Evaluation (3-judge consensus)
+Hybrid multi-layer validation:
+- Stage 0: Programmatic consistency checks (fast, free)
+- Stage 1: Pydantic schema validation (fast, free)
+- Stage 2: AI tribunal evaluation (slow, costs money)
 
-Reference: docs/testing/testing_philosophy.md
+Production features:
+- Diverse judge models (gpt-4o, gpt-4o-mini, gpt-4-turbo)
+- Median consensus for 3 judges (outlier resistant)
+- Concurrent execution with timeouts
+- Fail-closed on errors
+- Full telemetry logging
 """
 import json
+import re
+import statistics
+import uuid
+import asyncio
+import time
 import logging
-from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
-from enum import Enum
+from typing import List, Dict, Any, Literal
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 logger = logging.getLogger(__name__)
 
 
-class EvaluationCriteria(str, Enum):
-    """Evaluation criteria for AI tribunal."""
-    LOGICAL_CONSISTENCY = "logical_consistency"
-    COMPLETENESS = "completeness"
-    ACCURACY = "accuracy"
-    INSTRUCTION_ADHERENCE = "instruction_adherence"
-    CODE_QUALITY = "code_quality"
-    SECURITY_AWARENESS = "security_awareness"
+# ============================================================================
+# Model Capabilities (avoid "works on my box" drift)
+# ============================================================================
+
+MODEL_CAPS = {
+    "gpt-4o": {"temperature": True, "response_format": True},
+    "gpt-4o-mini": {"temperature": True, "response_format": True},
+    "gpt-4-turbo": {"temperature": True, "response_format": True},
+    # Legacy/unsupported models
+    "gpt-5": {"temperature": False, "response_format": True},  # No temperature support
+}
+
+ALLOWED_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"]  # Production allowlist
 
 
-@dataclass
-class RubricResult:
-    """Result of Stage 1 rubric validation."""
+def _judge_kwargs(model_name: str, temperature: float, seed: int) -> Dict[str, Any]:
+    """
+    Build API kwargs based on model capabilities.
+    
+    Prevents capability errors by checking model support.
+    """
+    caps = MODEL_CAPS.get(model_name, {"temperature": True, "response_format": False})
+    
+    kwargs = {
+        "model": model_name,
+        "seed": seed,
+        "messages": [],  # Will be filled by caller
+    }
+    
+    # Only add temperature if supported
+    if caps["temperature"] and temperature is not None:
+        kwargs["temperature"] = temperature
+    
+    # Only add response_format if supported
+    if caps["response_format"]:
+        kwargs["response_format"] = {"type": "json_object"}
+    
+    return kwargs
+
+
+# ============================================================================
+# Response Models (Pydantic for automatic validation)
+# ============================================================================
+
+class GoalProximity(BaseModel):
+    """Goal proximity LLM response schema."""
+    proximity_score: float = Field(ge=0, le=1, description="How close to goal (0-1)")
+    reasoning: str = Field(min_length=1, description="Why this score")
+    evidence: str = Field(min_length=1, description="Concrete evidence")
+    confidence: float = Field(ge=0, le=1, description="Confidence in assessment")
+    
+    @field_validator("reasoning", "evidence")
+    @classmethod
+    def nonempty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("cannot be empty")
+        return v
+
+
+class OrchestratorDecision(BaseModel):
+    """Orchestrator decision response schema."""
+    reasoning: str = Field(min_length=1, description="Decision reasoning")
+    decision: Dict[str, Any] = Field(description="Structured decision")
+    confidence: float = Field(ge=0, le=1, description="Confidence in decision")
+    
+    @field_validator("reasoning")
+    @classmethod
+    def nonempty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("cannot be empty")
+        return v
+    
+    @field_validator("decision")
+    @classmethod
+    def has_action(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        if "action" not in v and "agent" not in v:
+            raise ValueError("decision must have 'action' or 'agent'")
+        return v
+
+
+class PromptImprovement(BaseModel):
+    """Prompt improvement response schema."""
+    suggestions: List[Dict[str, str]] = Field(description="Improvement suggestions")
+    confidence: float = Field(ge=0, le=1)
+    reasoning: str = Field(min_length=1)
+    
+    @field_validator("suggestions")
+    @classmethod
+    def good_suggestions(cls, v: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        if not v:
+            raise ValueError("suggestions cannot be empty")
+        for s in v:
+            if "suggestion" not in s or "rationale" not in s:
+                raise ValueError("each suggestion needs 'suggestion' and 'rationale'")
+        return v
+    
+    @field_validator("reasoning")
+    @classmethod
+    def nonempty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("cannot be empty")
+        return v
+
+
+# ============================================================================
+# Result Models
+# ============================================================================
+
+class RubricResult(BaseModel):
+    """Result of schema validation + consistency checks."""
     passed: bool
-    errors: List[str]
-    warnings: List[str]
-    score: float  # 0-1
+    score: float
+    errors: List[str] = []
+    warnings: List[str] = []
+    consistency_issues: List[str] = []
 
 
-@dataclass
-class JudgeEvaluation:
-    """Single judge's evaluation."""
+class JudgeEval(BaseModel):
+    """Single judge evaluation."""
     judge_id: str
-    criteria: EvaluationCriteria
-    score: float  # 0-1
-    confidence: float  # 0-1
-    reasoning: str
-    passed: bool  # True if score >= threshold
-
-
-@dataclass
-class TribunalVerdict:
-    """Final tribunal verdict with consensus."""
+    criteria: Literal["logical_consistency", "completeness", "accuracy"]
+    score: float
+    confidence: float
     passed: bool
-    consensus_score: float  # Average of judges
-    consensus_confidence: float  # Average confidence
-    judge_evaluations: List[JudgeEvaluation]
-    unanimous: bool
     reasoning: str
+    model_used: str = ""  # Track which model was used
+    http_status: int = 200  # HTTP status code
+    used_response_format: bool = False  # Whether JSON format was enforced
 
 
-class RubricValidator:
-    """
-    Stage 1: Rubric Validation
-    
-    Fast, deterministic validation of LLM response structure.
-    """
-    
-    @staticmethod
-    def validate_goal_proximity_response(response: Dict[str, Any]) -> RubricResult:
-        """
-        Validate orchestrator goal proximity LLM response.
-        
-        Required structure:
-        {
-            "proximity_score": float (0-1),
-            "reasoning": str (non-empty),
-            "evidence": str (non-empty),
-            "confidence": float (0-1)
-        }
-        """
-        errors = []
-        warnings = []
-        score = 1.0
-        
-        # Check required fields
-        required_fields = ["proximity_score", "reasoning", "evidence", "confidence"]
-        for field in required_fields:
-            if field not in response:
-                errors.append(f"Missing required field: {field}")
-                score -= 0.25
-        
-        # Validate proximity_score
-        if "proximity_score" in response:
-            proximity = response["proximity_score"]
-            if not isinstance(proximity, (int, float)):
-                errors.append(f"proximity_score must be number, got {type(proximity).__name__}")
-                score -= 0.2
-            elif not (0 <= proximity <= 1):
-                errors.append(f"proximity_score must be 0-1, got {proximity}")
-                score -= 0.2
-        
-        # Validate confidence
-        if "confidence" in response:
-            confidence = response["confidence"]
-            if not isinstance(confidence, (int, float)):
-                errors.append(f"confidence must be number, got {type(confidence).__name__}")
-                score -= 0.2
-            elif not (0 <= confidence <= 1):
-                errors.append(f"confidence must be 0-1, got {confidence}")
-                score -= 0.2
-        
-        # Validate reasoning
-        if "reasoning" in response:
-            reasoning = response["reasoning"]
-            if not isinstance(reasoning, str):
-                errors.append(f"reasoning must be string, got {type(reasoning).__name__}")
-                score -= 0.15
-            elif len(reasoning.strip()) == 0:
-                warnings.append("reasoning is empty")
-                score -= 0.05
-            elif len(reasoning.strip()) < 20:
-                warnings.append("reasoning is very short (< 20 chars)")
-                score -= 0.05
-        
-        # Validate evidence
-        if "evidence" in response:
-            evidence = response["evidence"]
-            if not isinstance(evidence, str):
-                errors.append(f"evidence must be string, got {type(evidence).__name__}")
-                score -= 0.15
-            elif len(evidence.strip()) == 0:
-                warnings.append("evidence is empty")
-                score -= 0.05
-        
-        passed = len(errors) == 0 and score >= 0.7
-        
-        return RubricResult(
-            passed=passed,
-            errors=errors,
-            warnings=warnings,
-            score=max(0.0, score)
-        )
-    
-    @staticmethod
-    def validate_prompt_improvement_response(response: Dict[str, Any]) -> RubricResult:
-        """
-        Validate AI assistant prompt improvement response.
-        
-        Required structure:
-        {
-            "suggestions": [{"suggestion": str, "rationale": str}],
-            "confidence": float (0-1),
-            "reasoning": str
-        }
-        """
-        errors = []
-        warnings = []
-        score = 1.0
-        
-        # Check required fields
-        required_fields = ["suggestions", "confidence", "reasoning"]
-        for field in required_fields:
-            if field not in response:
-                errors.append(f"Missing required field: {field}")
-                score -= 0.33
-        
-        # Validate suggestions
-        if "suggestions" in response:
-            suggestions = response["suggestions"]
-            if not isinstance(suggestions, list):
-                errors.append(f"suggestions must be list, got {type(suggestions).__name__}")
-                score -= 0.3
-            elif len(suggestions) == 0:
-                warnings.append("suggestions list is empty")
-                score -= 0.1
-            else:
-                for i, suggestion in enumerate(suggestions):
-                    if not isinstance(suggestion, dict):
-                        errors.append(f"suggestion[{i}] must be dict")
-                        score -= 0.1
-                    elif "suggestion" not in suggestion:
-                        errors.append(f"suggestion[{i}] missing 'suggestion' field")
-                        score -= 0.1
-                    elif "rationale" not in suggestion:
-                        errors.append(f"suggestion[{i}] missing 'rationale' field")
-                        score -= 0.1
-        
-        # Validate confidence
-        if "confidence" in response:
-            confidence = response["confidence"]
-            if not isinstance(confidence, (int, float)):
-                errors.append(f"confidence must be number")
-                score -= 0.2
-            elif not (0 <= confidence <= 1):
-                errors.append(f"confidence must be 0-1")
-                score -= 0.2
-        
-        # Validate reasoning
-        if "reasoning" in response:
-            reasoning = response["reasoning"]
-            if not isinstance(reasoning, str):
-                errors.append(f"reasoning must be string")
-                score -= 0.2
-            elif len(reasoning.strip()) == 0:
-                warnings.append("reasoning is empty")
-                score -= 0.1
-        
-        passed = len(errors) == 0 and score >= 0.7
-        
-        return RubricResult(
-            passed=passed,
-            errors=errors,
-            warnings=warnings,
-            score=max(0.0, score)
-        )
+class Verdict(BaseModel):
+    """Tribunal consensus verdict."""
+    passed: bool
+    consensus_score: float
+    consensus_confidence: float
+    unanimous: bool
+    disagreement: float  # 0=all agree, 1=maximum disagreement
+    evaluations: List[JudgeEval]
+    reasoning: str
+    trace_id: str  # For debugging/audit
+    indeterminate: bool = False  # True if verdict couldn't be determined
+    models_used: List[str] = []  # Track which models were used
+    latency_ms: float = 0.0  # Total time taken
+    estimated_cost: float = 0.0  # Estimated API cost
 
 
-class AITribunal:
+# ============================================================================
+# Stage 0: Programmatic Consistency Checks
+# ============================================================================
+
+def _consistency_checks(resp: Dict[str, Any]) -> List[str]:
     """
-    Stage 2: AI Panel Evaluation
+    Fast programmatic logic checks.
     
-    3-judge consensus panel for semantic quality assessment.
+    Catches obvious contradictions before expensive validation.
+    Returns list of issues (empty = consistent).
     """
+    issues = []
+    s = resp.get("proximity_score")
+    c = resp.get("confidence")
+    r = (resp.get("reasoning", "") + " " + resp.get("evidence", "")).lower()
     
-    def __init__(self, openai_client=None):
-        """Initialize tribunal with OpenAI client (or mock for testing)."""
+    # Extended phrase lists (from both systems)
+    neg = (
+        "no progress", "not started", "nothing done", "not implemented",
+        "no files", "nothing implemented", "hasn't begun", "not created",
+        "no work", "no code", "not working", "failed", "error"
+    )
+    pos = (
+        "complete", "finished", "implemented", "working", "deployed",
+        "passing", "successful", "done", "ready", "completed"
+    )
+    
+    if isinstance(s, (int, float)):
+        if s > 0.8 and any(p in r for p in neg):
+            issues.append(f"high score ({s:.2f}) contradicts negative language")
+        if s < 0.3 and any(p in r for p in pos):
+            issues.append(f"low score ({s:.2f}) contradicts positive language")
+        if 0.3 <= s <= 0.7:
+            extreme = ("100%", "0%", "all done", "completely finished", "nothing", "none")
+            if any(ex in r for ex in extreme):
+                issues.append(f"mid score ({s:.2f}) uses extreme language")
+    
+    if isinstance(c, (int, float)):
+        if c > 0.9 and any(w in r for w in ("uncertain", "maybe", "possibly", "perhaps")):
+            issues.append(f"high confidence ({c:.2f}) but hedging language")
+        if c < 0.5 and any(w in r for w in ("definitely", "certainly", "clearly", "obviously")):
+            issues.append(f"low confidence ({c:.2f}) but definitive language")
+    
+    return issues
+
+
+def _orchestrator_consistency_checks(resp: Dict[str, Any]) -> List[str]:
+    """Consistency checks for orchestrator decision format."""
+    issues = []
+    c = resp.get("confidence")
+    r = resp.get("reasoning", "").lower()
+    decision = resp.get("decision", {})
+    
+    if isinstance(c, (int, float)):
+        if c > 0.9 and any(w in r for w in ("uncertain", "unclear", "maybe")):
+            issues.append(f"high confidence ({c:.2f}) but uncertain reasoning")
+        if c < 0.4 and "clear" in r or "obvious" in r:
+            issues.append(f"low confidence ({c:.2f}) but certain language")
+    
+    # Check decision structure
+    if isinstance(decision, dict):
+        if c and c > 0.8 and not decision:
+            issues.append("high confidence but empty decision")
+    
+    return issues
+
+
+# ============================================================================
+# Stage 1: Schema Validation
+# ============================================================================
+
+def validate_goal_proximity(response: Dict[str, Any]) -> RubricResult:
+    """
+    Validate goal proximity response.
+    
+    Combines consistency checks + Pydantic validation.
+    """
+    errors = []
+    warnings = []
+    score = 1.0
+    
+    # Stage 0: Consistency checks
+    issues = _consistency_checks(response)
+    if issues:
+        errors += issues
+        score -= 0.25 * len(issues)
+    
+    # Stage 1: Schema validation
+    try:
+        GoalProximity(**response)
+    except ValidationError as e:
+        for err in e.errors():
+            field = ".".join(str(x) for x in err["loc"])
+            errors.append(f"{field}: {err['msg']}")
+        score -= 0.2 * len(e.errors())
+    
+    # Additional warnings
+    r = response.get("reasoning", "")
+    if isinstance(r, str) and 0 < len(r.strip()) < 20:
+        warnings.append("reasoning is very short")
+        score -= 0.05
+    
+    return RubricResult(
+        passed=(score >= 0.7 and not errors),
+        score=max(0.0, score),
+        errors=errors,
+        warnings=warnings,
+        consistency_issues=issues
+    )
+
+
+def validate_orchestrator_decision(response: Dict[str, Any]) -> RubricResult:
+    """Validate orchestrator decision response."""
+    errors = []
+    warnings = []
+    score = 1.0
+    
+    # Stage 0: Consistency checks
+    issues = _orchestrator_consistency_checks(response)
+    if issues:
+        errors += issues
+        score -= 0.25 * len(issues)
+    
+    # Stage 1: Schema validation
+    try:
+        OrchestratorDecision(**response)
+    except ValidationError as e:
+        for err in e.errors():
+            field = ".".join(str(x) for x in err["loc"])
+            errors.append(f"{field}: {err['msg']}")
+        score -= 0.2 * len(e.errors())
+    
+    # Check decision quality
+    decision = response.get("decision", {})
+    if isinstance(decision, dict):
+        if "next_steps" not in decision:
+            warnings.append("decision missing next_steps")
+            score -= 0.05
+    
+    return RubricResult(
+        passed=(score >= 0.7 and not errors),
+        score=max(0.0, score),
+        errors=errors,
+        warnings=warnings,
+        consistency_issues=issues
+    )
+
+
+def validate_prompt_improvement(response: Dict[str, Any]) -> RubricResult:
+    """Validate prompt improvement response."""
+    errors = []
+    warnings = []
+    score = 1.0
+    
+    try:
+        PromptImprovement(**response)
+    except ValidationError as e:
+        for err in e.errors():
+            field = ".".join(str(x) for x in err["loc"])
+            errors.append(f"{field}: {err['msg']}")
+        score -= 0.2 * len(e.errors())
+    
+    r = response.get("reasoning", "")
+    if isinstance(r, str) and 0 < len(r.strip()) < 20:
+        warnings.append("reasoning short")
+        score -= 0.05
+    
+    return RubricResult(
+        passed=(score >= 0.7 and not errors),
+        score=max(0.0, score),
+        errors=errors,
+        warnings=warnings,
+        consistency_issues=[]
+    )
+
+
+# ============================================================================
+# Stage 2: AI Tribunal
+# ============================================================================
+
+def _extract_json(txt: str) -> Dict[str, Any]:
+    """Extract JSON from LLM response (handles markdown code blocks)."""
+    # Try to find JSON at end
+    m = re.search(r"\{.*\}$", txt.strip(), re.S)
+    if not m:
+        # Try anywhere in text
+        m = re.search(r"\{.*\}", txt, re.S)
+    if not m:
+        raise ValueError("no json found in response")
+    return json.loads(m.group(0))
+
+
+class Judge:
+    """Single AI judge for tribunal evaluation."""
+    
+    def __init__(
+        self,
+        name: str,
+        openai_client: Any,
+        model_name: str,  # Specific model: gpt-5, gpt-4o, gpt-4.1-mini
+        criteria: str,
+        seed: int,
+        temperature: float = 0.2,
+        max_retries: int = 2,
+        timeout_seconds: float = 8.0
+    ):
+        self.name = name
         self.openai_client = openai_client
+        self.model_name = model_name
+        self.criteria = criteria
+        self.seed = seed
+        self.temperature = temperature
+        self.max_retries = max_retries
+        self.timeout_seconds = timeout_seconds
     
-    async def evaluate_goal_proximity_quality(
+    async def evaluate(
+        self,
+        task_goal: str,
+        current_state: str,
+        llm_response: Dict[str, Any]
+    ) -> JudgeEval:
+        """Evaluate LLM response quality."""
+        sys_prompt = f"You are evaluating LLM output for {self.criteria}."
+        user_prompt = (
+            f"Task Goal: {task_goal}\n"
+            f"Current State: {current_state}\n"
+            f"LLM Response:\n{json.dumps(llm_response, ensure_ascii=False)}\n"
+            f"Respond in JSON: {{\"score\":0-1,\"confidence\":0-1,\"reasoning\":\"...\"}}"
+        )
+        
+        for attempt in range(self.max_retries + 1):
+            try:
+                # Build capability-aware kwargs
+                api_kwargs = _judge_kwargs(self.model_name, self.temperature, self.seed)
+                api_kwargs["messages"] = [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+                
+                used_response_format = "response_format" in api_kwargs
+                
+                # Call with timeout
+                msg = await asyncio.wait_for(
+                    self.openai_client.chat.completions.create(**api_kwargs),
+                    timeout=self.timeout_seconds
+                )
+                
+                data = _extract_json(msg.choices[0].message.content)
+                s = float(data["score"])
+                cf = float(data["confidence"])
+                rs = str(data.get("reasoning", ""))
+                
+                return JudgeEval(
+                    judge_id=self.name,
+                    criteria=self.criteria,
+                    score=max(0, min(1, s)),
+                    confidence=max(0, min(1, cf)),
+                    passed=s >= 0.8,
+                    reasoning=rs,
+                    model_used=self.model_name,
+                    http_status=200,
+                    used_response_format=used_response_format
+                )
+            except Exception as e:
+                if attempt == self.max_retries:
+                    # Last attempt failed
+                    return JudgeEval(
+                        judge_id=self.name,
+                        criteria=self.criteria,
+                        score=0.0,
+                        confidence=0.0,
+                        passed=False,
+                        reasoning=f"parse_error: {str(e)}"
+                    )
+                continue
+        
+        # Should never reach here
+        return JudgeEval(
+            judge_id=self.name,
+            criteria=self.criteria,
+            score=0.0,
+            confidence=0.0,
+            passed=False,
+            reasoning="max_retries_exceeded"
+        )
+
+
+class Tribunal:
+    """3-judge AI tribunal for consensus evaluation."""
+    
+    def __init__(self, judges: List[Judge]):
+        self.judges = judges
+        self.total_timeout = 25.0  # Total budget for all judges
+    
+    @staticmethod
+    def _consensus(vals: List[float]) -> float:
+        """
+        Calculate consensus score.
+        
+        For 3 judges: Use median (outlier resistant)
+        For 5+ judges: Use 20% trimmed mean
+        """
+        if not vals:
+            return 0.0
+        
+        n = len(vals)
+        
+        if n == 3:
+            # Use median for 3 judges (more robust)
+            return statistics.median(vals)
+        elif n >= 5:
+            # Use trimmed mean for 5+ judges
+            k = int(n * 0.2)
+            arr = sorted(vals)
+            sel = arr[k:n-k] if k > 0 else arr
+            return sum(sel) / len(sel) if sel else 0.0
+        else:
+            # Fallback to median
+            return statistics.median(vals)
+    
+    @staticmethod
+    def _disagreement(passes: List[bool]) -> float:
+        """
+        Calculate disagreement metric.
+        
+        0.0 = all judges agree
+        0.5 = maximum disagreement (50/50 split)
+        1.0 = impossible (reserved)
+        
+        Uses formula: 1 - (p^2 + (1-p)^2) where p = pass rate
+        """
+        if not passes:
+            return 1.0
+        a = sum(passes) / len(passes)
+        return 1 - (a * a + (1 - a) * (1 - a))
+    
+    async def evaluate(
         self,
         task_goal: str,
         current_state: str,
         llm_response: Dict[str, Any],
         threshold: float = 0.8
-    ) -> TribunalVerdict:
+    ) -> Verdict:
         """
-        Tribunal evaluates goal proximity LLM response quality.
+        Evaluate LLM response with 3-judge tribunal.
         
-        Judge 1: Logical consistency (is reasoning sound?)
-        Judge 2: Completeness (covers all aspects?)
-        Judge 3: Accuracy (matches actual state?)
+        Production features:
+        - Concurrent execution with total timeout
+        - Fail-closed on parse errors
+        - Full telemetry
         
-        Requires ≥80% confidence consensus.
+        Returns consensus verdict with trace ID.
         """
-        judge_evaluations = []
+        trace_id = str(uuid.uuid4())
+        start_time = time.time()
         
-        # Judge 1: Logical Consistency
-        judge1 = await self._evaluate_judge(
-            judge_id="judge_1",
-            criteria=EvaluationCriteria.LOGICAL_CONSISTENCY,
-            prompt=self._build_logical_consistency_prompt(
-                task_goal, current_state, llm_response
-            ),
-            threshold=threshold
-        )
-        judge_evaluations.append(judge1)
+        logger.info(f"[{trace_id}] Starting tribunal evaluation with {len(self.judges)} judges")
         
-        # Judge 2: Completeness
-        judge2 = await self._evaluate_judge(
-            judge_id="judge_2",
-            criteria=EvaluationCriteria.COMPLETENESS,
-            prompt=self._build_completeness_prompt(
-                task_goal, current_state, llm_response
-            ),
-            threshold=threshold
-        )
-        judge_evaluations.append(judge2)
-        
-        # Judge 3: Accuracy
-        judge3 = await self._evaluate_judge(
-            judge_id="judge_3",
-            criteria=EvaluationCriteria.ACCURACY,
-            prompt=self._build_accuracy_prompt(
-                task_goal, current_state, llm_response
-            ),
-            threshold=threshold
-        )
-        judge_evaluations.append(judge3)
-        
-        # Calculate consensus
-        consensus_score = sum(j.score for j in judge_evaluations) / len(judge_evaluations)
-        consensus_confidence = sum(j.confidence for j in judge_evaluations) / len(judge_evaluations)
-        unanimous = all(j.passed for j in judge_evaluations)
-        passed = consensus_score >= threshold and consensus_confidence >= threshold
-        
-        # Build reasoning
-        reasoning = self._build_consensus_reasoning(judge_evaluations)
-        
-        return TribunalVerdict(
-            passed=passed,
-            consensus_score=consensus_score,
-            consensus_confidence=consensus_confidence,
-            judge_evaluations=judge_evaluations,
-            unanimous=unanimous,
-            reasoning=reasoning
-        )
-    
-    async def _evaluate_judge(
-        self,
-        judge_id: str,
-        criteria: EvaluationCriteria,
-        prompt: str,
-        threshold: float
-    ) -> JudgeEvaluation:
-        """Execute single judge evaluation."""
-        if self.openai_client is None:
-            # Mock for testing
-            return JudgeEvaluation(
-                judge_id=judge_id,
-                criteria=criteria,
-                score=0.85,
-                confidence=0.9,
-                reasoning="Mock judge evaluation",
-                passed=True
-            )
-        
-        # Real OpenAI evaluation
         try:
-            response = await self.openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": f"You are evaluating LLM output for {criteria.value}."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3  # Low temperature for consistent evaluation
+            # Run judges CONCURRENTLY with total timeout
+            evals = await asyncio.wait_for(
+                asyncio.gather(*[
+                    j.evaluate(task_goal, current_state, llm_response)
+                    for j in self.judges
+                ], return_exceptions=True),
+                timeout=self.total_timeout
             )
             
-            # Parse response
-            content = response.choices[0].message.content
-            evaluation = json.loads(content)
+            # Check for failures
+            failed_judges = []
+            successful_evals = []
             
-            return JudgeEvaluation(
-                judge_id=judge_id,
-                criteria=criteria,
-                score=evaluation["score"],
-                confidence=evaluation["confidence"],
-                reasoning=evaluation["reasoning"],
-                passed=evaluation["score"] >= threshold
+            for i, result in enumerate(evals):
+                if isinstance(result, Exception):
+                    failed_judges.append(f"{self.judges[i].name}: {str(result)}")
+                elif "parse_error" in result.reasoning or "max_retries" in result.reasoning:
+                    failed_judges.append(f"{result.judge_id}: {result.reasoning}")
+                else:
+                    successful_evals.append(result)
+            
+            # FAIL-CLOSED: If any judge failed, mark as indeterminate
+            if failed_judges:
+                latency = (time.time() - start_time) * 1000
+                logger.error(f"[{trace_id}] Judge failures: {failed_judges}")
+                
+                return Verdict(
+                    passed=False,
+                    consensus_score=0.0,
+                    consensus_confidence=0.0,
+                    unanimous=False,
+                    disagreement=1.0,
+                    evaluations=successful_evals,
+                    reasoning=f"INDETERMINATE: Judge failures - {'; '.join(failed_judges)}",
+                    trace_id=trace_id,
+                    indeterminate=True,
+                    models_used=[j.model_name for j in self.judges],
+                    latency_ms=latency,
+                    estimated_cost=0.0
+                )
+            
+            scores = [e.score for e in successful_evals]
+            confs = [e.confidence for e in successful_evals]
+            passes = [e.passed for e in successful_evals]
+            
+            # Use MEDIAN for 3 judges (outlier resistant)
+            cscore = self._consensus(scores)
+            cconf = self._consensus(confs)
+            
+            unanimous = all(passes)
+            disagree = self._disagreement(passes)
+            
+            # High disagreement warning - ALERT POLICY
+            if disagree > 0.3:
+                logger.warning(
+                    f"[{trace_id}] HIGH DISAGREEMENT: {disagree:.2f} - "
+                    f"ALERT: Review required. Trace: {trace_id}"
+                )
+            
+            # 2-OF-3 PASS RULE: Require majority agreement
+            two_of_three = sum(passes) >= 2
+            
+            # Pass requires: score threshold + confidence threshold + majority
+            passed = (cscore >= threshold and cconf >= threshold and two_of_three)
+            
+            reasoning = "\n".join([
+                f"{e.criteria}: {'PASS' if e.passed else 'FAIL'} "
+                f"s={e.score:.2f} c={e.confidence:.2f} {e.reasoning[:80]}..."
+                for e in successful_evals
+            ])
+            
+            # Telemetry
+            latency = (time.time() - start_time) * 1000
+            models_used = [j.model_name for j in self.judges]
+            
+            # Rough cost estimation (input ~200 tokens, output ~100 tokens per judge)
+            cost_per_judge = {
+                "gpt-4o": 0.0015,  # $2.50/1M input, $10/1M output
+                "gpt-4o-mini": 0.0001,  # $0.15/1M input, $0.60/1M output
+                "gpt-4-turbo": 0.002,  # $10/1M input, $30/1M output
+            }
+            estimated_cost = sum(cost_per_judge.get(m, 0.001) for m in models_used)
+            
+            logger.info(
+                f"[{trace_id}] Verdict: {passed}, Score: {cscore:.2f}, "
+                f"Disagreement: {disagree:.2f}, Latency: {latency:.0f}ms, Cost: ${estimated_cost:.4f}"
             )
             
-        except Exception as e:
-            logger.error(f"Judge {judge_id} evaluation failed: {e}")
-            return JudgeEvaluation(
-                judge_id=judge_id,
-                criteria=criteria,
-                score=0.0,
-                confidence=0.0,
-                reasoning=f"Evaluation failed: {e}",
-                passed=False
+            return Verdict(
+                passed=passed,
+                consensus_score=cscore,
+                consensus_confidence=cconf,
+                unanimous=unanimous,
+                disagreement=disagree,
+                evaluations=successful_evals,
+                reasoning=reasoning,
+                trace_id=trace_id,
+                indeterminate=False,
+                models_used=models_used,
+                latency_ms=latency,
+                estimated_cost=estimated_cost
             )
-    
-    def _build_logical_consistency_prompt(
-        self,
-        task_goal: str,
-        current_state: str,
-        llm_response: Dict[str, Any]
-    ) -> str:
-        """Build prompt for logical consistency evaluation."""
-        return f"""Evaluate the logical consistency of this LLM response.
-
-Task Goal: {task_goal}
-Current State: {current_state}
-
-LLM Response:
-{json.dumps(llm_response, indent=2)}
-
-Evaluate:
-1. Is the reasoning logically sound?
-2. Do the conclusions follow from the evidence?
-3. Are there logical fallacies or contradictions?
-
-Respond in JSON:
-{{
-    "score": <0-1>,
-    "confidence": <0-1>,
-    "reasoning": "<your analysis>"
-}}
-"""
-    
-    def _build_completeness_prompt(
-        self,
-        task_goal: str,
-        current_state: str,
-        llm_response: Dict[str, Any]
-    ) -> str:
-        """Build prompt for completeness evaluation."""
-        return f"""Evaluate the completeness of this LLM response.
-
-Task Goal: {task_goal}
-Current State: {current_state}
-
-LLM Response:
-{json.dumps(llm_response, indent=2)}
-
-Evaluate:
-1. Does it address all aspects of the task?
-2. Is the evidence comprehensive?
-3. Are edge cases considered?
-
-Respond in JSON:
-{{
-    "score": <0-1>,
-    "confidence": <0-1>,
-    "reasoning": "<your analysis>"
-}}
-"""
-    
-    def _build_accuracy_prompt(
-        self,
-        task_goal: str,
-        current_state: str,
-        llm_response: Dict[str, Any]
-    ) -> str:
-        """Build prompt for accuracy evaluation."""
-        return f"""Evaluate the accuracy of this LLM response.
-
-Task Goal: {task_goal}
-Current State: {current_state}
-
-LLM Response:
-{json.dumps(llm_response, indent=2)}
-
-Evaluate:
-1. Does the proximity score match the actual progress?
-2. Is the evidence accurately described?
-3. Are there factual errors?
-
-Respond in JSON:
-{{
-    "score": <0-1>,
-    "confidence": <0-1>,
-    "reasoning": "<your analysis>"
-}}
-"""
-    
-    def _build_consensus_reasoning(self, evaluations: List[JudgeEvaluation]) -> str:
-        """Build consensus reasoning from all judges."""
-        lines = ["Tribunal Evaluation:"]
-        for eval in evaluations:
-            status = "PASS" if eval.passed else "FAIL"
-            lines.append(f"- {eval.criteria.value}: {status} (score: {eval.score:.2f}, confidence: {eval.confidence:.2f})")
-            lines.append(f"  {eval.reasoning}")
-        return "\n".join(lines)
+            
+        except asyncio.TimeoutError:
+            latency = (time.time() - start_time) * 1000
+            logger.error(f"[{trace_id}] Tribunal timeout after {latency:.0f}ms")
+            
+            return Verdict(
+                passed=False,
+                consensus_score=0.0,
+                consensus_confidence=0.0,
+                unanimous=False,
+                disagreement=1.0,
+                evaluations=[],
+                reasoning=f"INDETERMINATE: Tribunal timeout after {self.total_timeout}s",
+                trace_id=trace_id,
+                indeterminate=True,
+                models_used=[j.model_name for j in self.judges],
+                latency_ms=latency,
+                estimated_cost=0.0
+            )
 
 
-# Convenience functions for tests
+# ============================================================================
+# Public API
+# ============================================================================
 
-def validate_llm_response_rubric(response: Dict[str, Any], response_type: str) -> RubricResult:
+def evaluate_with_rubric(response: Dict[str, Any], rtype: str) -> RubricResult:
     """
-    Validate LLM response using rubric (Stage 1).
+    Evaluate response with rubric validation.
     
     Args:
         response: LLM response dict
-        response_type: "goal_proximity" or "prompt_improvement"
+        rtype: "goal_proximity", "orchestrator_decision", or "prompt_improvement"
     
     Returns:
-        RubricResult with pass/fail and details
+        RubricResult with validation details
     """
-    if response_type == "goal_proximity":
-        return RubricValidator.validate_goal_proximity_response(response)
-    elif response_type == "prompt_improvement":
-        return RubricValidator.validate_prompt_improvement_response(response)
-    else:
-        raise ValueError(f"Unknown response_type: {response_type}")
+    if rtype == "goal_proximity":
+        return validate_goal_proximity(response)
+    if rtype == "orchestrator_decision":
+        return validate_orchestrator_decision(response)
+    if rtype == "prompt_improvement":
+        return validate_prompt_improvement(response)
+    raise ValueError(f"unknown rtype: {rtype}")
 
 
-async def evaluate_llm_response_tribunal(
+async def evaluate_with_tribunal(
     response: Dict[str, Any],
-    context: Dict[str, Any],
-    openai_client=None,
+    context: Dict[str, str],
+    openai_client: Any,
     threshold: float = 0.8
-) -> TribunalVerdict:
+) -> Verdict:
     """
-    Evaluate LLM response using AI tribunal (Stage 2).
+    Evaluate response with AI tribunal.
+    
+    Production configuration:
+    - 3 diverse judges using different models for independence
+    - Judge 1: gpt-4o (logical consistency)
+    - Judge 2: gpt-4o-mini (completeness)
+    - Judge 3: gpt-4-turbo (accuracy)
+    - Concurrent execution with per-judge and total timeouts
+    - Median consensus (outlier resistant for 3 judges)
     
     Args:
         response: LLM response dict
-        context: Context dict with task_goal, current_state, etc.
-        openai_client: OpenAI client (or None for mocks)
+        context: {"task_goal": "...", "current_state": "..."}
+        openai_client: AsyncOpenAI client
         threshold: Pass threshold (default 0.8)
     
     Returns:
-        TribunalVerdict with consensus evaluation
+        Verdict with consensus, telemetry, and trace ID
     """
-    tribunal = AITribunal(openai_client)
+    # DIVERSE JUDGES: Different models for independence
+    # Using available models: gpt-4o (frontier), gpt-4o-mini (efficient), gpt-4-turbo (legacy)
+    judges = [
+        Judge("judge_1", openai_client, "gpt-4o", "logical_consistency", seed=42, timeout_seconds=8.0),
+        Judge("judge_2", openai_client, "gpt-4o-mini", "completeness", seed=43, timeout_seconds=8.0),
+        Judge("judge_3", openai_client, "gpt-4-turbo", "accuracy", seed=44, timeout_seconds=8.0),
+    ]
     
-    return await tribunal.evaluate_goal_proximity_quality(
+    tribunal = Tribunal(judges)
+    
+    return await tribunal.evaluate(
         task_goal=context.get("task_goal", ""),
         current_state=context.get("current_state", ""),
         llm_response=response,

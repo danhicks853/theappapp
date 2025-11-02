@@ -1,12 +1,5 @@
 # TheAppApp Development Task Tracker
 
-## 🔄 Tracker Update - November 2, 2025
-**Major reconciliation completed**: Tracker has been updated to match actual codebase reality.
-- ✅ **Migrations 006-010**: Updated to reflect specialists/projects system (was incorrectly documented as gates/collaboration)
-- ✅ **Completed services marked**: AgentModelConfigService and migrations 004-010 now marked complete
-- ⚠️ **Future migrations**: Gates, collaboration, prompts, token tracking moved to "Future Migrations - Needs New Numbers" section
-- 📊 **See**: `TRACKER_UPDATES_SUMMARY.md` and `FULL_TRACKER_AUDIT.md` for complete details
-
 ## Overview
 This document tracks all development tasks derived from our 6-phase planning. Each task is marked as TODO, IN_PROGRESS, or COMPLETED as we work through the implementation.
 
@@ -1810,6 +1803,8 @@ The following features were originally planned for migrations 006-010 but those 
 
 ## Phase 2: Tool Ecosystem Implementation
 
+---
+
 ### 2.1 Code Execution Sandbox
 
 - [ ] **TODO**: Design Docker-based sandbox system for LLM-generated code (existing safeguards)
@@ -1843,89 +1838,102 @@ The following features were originally planned for migrations 006-010 but those 
   - **Acceptance**: Each project has isolated volume, no cross-project access
   - **Test**: Covered in 2.1.1 tests
 
-- [ ] **TODO**: Add LLM code validation and security scanning before execution (minimal additions)
-  - **File**: `backend/services/code_validator.py`
+- [x] **COMPLETED**: Add LLM code validation and security scanning before execution
+  - **File**: `backend/services/code_validator.py` ✅ (330 lines)
   - **Class**: `CodeValidator` with method `validate_code(code: str, language: str) -> ValidationResult`
   - **Checks**: Syntax validation, dangerous pattern detection (eval, exec, system calls), size limits
+  - **Features**: Python/JavaScript pattern detection, suspicious pattern warnings, size limits (1MB max)
   - **Action**: Warn on dangerous patterns, block on syntax errors
   - **Acceptance**: Validates code before execution, catches obvious issues, doesn't block legitimate code
   - **Test**: Test with safe/unsafe code samples, verify detection
+  - **Completed**: Nov 2, 2025
 
-- [ ] **TODO**: Create sandbox monitoring and logging for AI operations
-  - **File**: `backend/services/sandbox_monitor.py`
+- [x] **COMPLETED**: Create sandbox monitoring and logging for AI operations
+  - **File**: `backend/services/sandbox_monitor.py` ✅ (264 lines)
   - **Monitoring**: Container resource usage, command execution logs, error tracking
   - **Logging**: All commands logged with timestamp, agent_id, project_id, exit_code
+  - **Features**: Execution history (1000 records), resource limit checking, error alerting, statistics
   - **Acceptance**: All sandbox activity logged, resources monitored, alerts on anomalies
   - **Test**: Execute commands, verify logging, test monitoring
+  - **Completed**: Nov 2, 2025
 
 ### 2.1.1 Docker Container Lifecycle (Decision 78)
 **Reference**: `docs/architecture/decision-78-docker-container-lifecycle.md`
 
-- [ ] **TODO**: Implement ContainerManager service
-  - **File**: `backend/services/container_manager.py`
+- [x] **COMPLETED**: Implement ContainerManager service
+  - **File**: `backend/services/container_manager.py` ✅ (581 lines)
   - **Class**: `ContainerManager` with methods: `create_container()`, `destroy_container()`, `exec_command()`, `startup()`
   - **State**: Dict tracking active_containers by task_id
   - **Docker Client**: Uses docker-py library for container operations
   - **Acceptance**: Manages container lifecycle, tracks active containers, handles errors gracefully
   - **Test**: Unit tests for all methods, mock Docker client
+  - **Completed**: Nov 2, 2025
 
-- [ ] **TODO**: Build golden images for 8 languages (Python, Node.js, Java, Go, Ruby, PHP, .NET, PowerShell)
-  - **Dockerfiles**: `docker/images/{language}/Dockerfile` for each language
+- [x] **COMPLETED**: Build golden images for 8 languages (Python, Node.js, Java, Go, Ruby, PHP, .NET, PowerShell)
+  - **Dockerfiles**: `docker/images/{language}/Dockerfile` for each language ✅ (8 Dockerfiles created)
   - **Base Images**: python:3.11-slim, node:20-slim, openjdk:17-slim, golang:1.21-alpine, ruby:3.2-slim, php:8.2-cli, mcr.microsoft.com/dotnet/sdk:8.0, mcr.microsoft.com/powershell:lts-alpine
   - **Common Tools**: git, curl, basic build tools pre-installed
   - **Working Dir**: /workspace (mounted from persistent volume)
+  - **Build Script**: `docker/build-all.sh` ✅
   - **Acceptance**: All 8 images build successfully, optimized for size (<500MB each), include necessary tools
   - **Test**: Build all images, verify tools installed, test basic commands
+  - **Completed**: Nov 2, 2025
 
-- [ ] **TODO**: Create on-demand container creation (one per task)
-  - **File**: `backend/services/container_manager.py` - `create_container()` method
+- [x] **COMPLETED**: Create on-demand container creation (one per task)
+  - **File**: `backend/services/container_manager.py` - `create_container()` method ✅
   - **Trigger**: Agent starts new task
   - **Logic**: Select image by language → Create container with volume mount → Track in active_containers dict → Return container handle
-  - **Naming**: Container name format: `helix-{project_id}-{task_id}`
+  - **Naming**: Container name format: `theappapp-{project_id}-{task_id}`
   - **Acceptance**: Creates container in <2s, mounts project volume, returns ready container
   - **Test**: Create containers for all 8 languages, verify volume mounts
+  - **Completed**: Nov 2, 2025
 
-- [ ] **TODO**: Implement task-scoped container lifetime
-  - **Scope**: One container per task, destroyed when task completes
+- [x] **COMPLETED**: Implement task-scoped container lifetime
+  - **Scope**: One container per task, destroyed when task completes ✅
   - **Lifecycle**: Task start → Container created → Multiple commands executed → Task end → Container destroyed
   - **No Reuse**: Fresh container for each task, no pooling
   - **Acceptance**: Container exists only during task execution, destroyed immediately after
   - **Test**: Start task, verify container exists, complete task, verify container destroyed
+  - **Completed**: Nov 2, 2025
 
-- [ ] **TODO**: Build immediate container cleanup on task completion
-  - **File**: `backend/services/container_manager.py` - `destroy_container()` method
+- [x] **COMPLETED**: Build immediate container cleanup on task completion
+  - **File**: `backend/services/container_manager.py` - `destroy_container()` method ✅
   - **Trigger**: Task completion (success or failure)
   - **Logic**: Stop container (5s timeout) → Remove container → Remove from tracking dict
   - **Guarantee**: Cleanup in finally block to ensure execution even on errors
   - **Acceptance**: Container destroyed within 6s of task completion, no orphaned containers
   - **Test**: Complete task, verify cleanup, test cleanup on failure
+  - **Completed**: Nov 2, 2025
 
-- [ ] **TODO**: Create command execution in containers
-  - **File**: `backend/services/container_manager.py` - `exec_command()` method
+- [x] **COMPLETED**: Create command execution in containers
+  - **File**: `backend/services/container_manager.py` - `exec_command()` method ✅
   - **Parameters**: task_id, command (string)
   - **Execution**: container.exec_run(cmd=command, workdir='/workspace', demux=True)
-  - **Return**: {exit_code, stdout, stderr}
+  - **Return**: ContainerExecutionResult with exit_code, stdout, stderr
   - **Acceptance**: Executes commands, captures output, handles errors, returns structured result
   - **Test**: Execute various commands (success/failure), verify output capture
+  - **Completed**: Nov 2, 2025
 
-- [ ] **TODO**: Implement persistent volume mounting for project files
-  - **Volume Type**: Docker named volumes per project
-  - **Volume Name**: `helix-project-{project_id}`
+- [x] **COMPLETED**: Implement persistent volume mounting for project files
+  - **Volume Type**: Docker named volumes per project ✅
+  - **Volume Name**: `theappapp-project-{project_id}`
   - **Mount Point**: /workspace in container
   - **Persistence**: Files persist across container destruction/creation
   - **Acceptance**: Files written in one container visible in next container, survives restarts
   - **Test**: Write file in container, destroy container, create new container, verify file exists
+  - **Completed**: Nov 2, 2025
 
-- [ ] **TODO**: Build image pre-pulling during system startup
-  - **File**: `backend/services/container_manager.py` - `startup()` method
+- [x] **COMPLETED**: Build image pre-pulling during system startup
+  - **File**: `backend/services/container_manager.py` - `startup()` method ✅
   - **Trigger**: System startup, before accepting requests
   - **Logic**: For each language: docker_client.images.pull(image) → Log progress → Handle failures
   - **Timing**: Runs once at startup, blocks until complete
   - **Acceptance**: All images pulled before system ready, logs progress, handles missing images
   - **Test**: Start system with no cached images, verify all images pulled
+  - **Completed**: Nov 2, 2025
 
-- [ ] **TODO**: Create orphaned container cleanup job (hourly)
-  - **File**: `backend/jobs/container_cleanup.py`
+- [x] **COMPLETED**: Create orphaned container cleanup job (hourly)
+  - **File**: `backend/jobs/container_cleanup.py` ✅
   - **Schedule**: Hourly via cron
   - **Logic**: List all containers with label helix-managed → Check if task_id in active_containers → Destroy if orphaned
   - **Orphan Detection**: Container exists but not in active tracking dict
@@ -2206,13 +2214,15 @@ The following features were originally planned for migrations 006-010 but those 
   - **Acceptance**: Tokens refresh automatically, transparent to agent, updates database
   - **Test**: Expire token, trigger refresh, verify new tokens stored
 
-- [ ] **TODO**: Create GitHubSpecialistAgent with 3 operations (create repo, delete repo, merge PR)
-  - **File**: `backend/agents/github_specialist_agent.py`
-  - **Class**: `GitHubSpecialistAgent` with methods: `create_repo()`, `delete_repo()`, `merge_pr()`
-  - **Operations**: POST /user/repos (create), DELETE /repos/{owner}/{repo} (delete), PUT /repos/{owner}/{repo}/pulls/{number}/merge (merge)
-  - **Authentication**: Uses Bearer token from GitHubCredentialManager
+- [~] **PARTIAL**: Create GitHubSpecialistAgent with 3 operations (create repo, delete repo, merge PR)
+  - **File**: `backend/agents/github_specialist_agent.py` ✅ EXISTS (skeleton only)
+  - **Status**: Agent class created (32 lines) with system prompt, inherits from BaseAgent
+  - **MISSING**: Methods: `create_repo()`, `delete_repo()`, `merge_pr()` - NOT IMPLEMENTED
+  - **MISSING**: Operations: POST /user/repos (create), DELETE /repos/{owner}/{repo} (delete), PUT /repos/{owner}/{repo}/pulls/{number}/merge (merge)
+  - **MISSING**: Authentication: Uses Bearer token from GitHubCredentialManager
   - **Acceptance**: All 3 operations work, uses GitHub API v3, handles responses correctly
   - **Test**: Test each operation with mock GitHub API
+  - **Completion**: ~10% (skeleton only, no functionality)
 
 - [ ] **TODO**: Build retry logic with exponential backoff (3 attempts)
   - **File**: `backend/agents/github_specialist_agent.py` - `_execute_with_retry()` method

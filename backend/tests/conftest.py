@@ -66,15 +66,15 @@ def api_client():
 
 @pytest.fixture
 def mock_openai_client():
-    """Mock OpenAI client for LLM tests."""
-    from unittest.mock import Mock, MagicMock
+    """Mock OpenAI client for unit tests (non-LLM tests)."""
+    from unittest.mock import Mock, MagicMock, AsyncMock
     
-    mock_client = Mock()
+    mock_client = MagicMock()
     
-    # Mock chat completion
+    # Mock chat completion (async)
     mock_completion = MagicMock()
     mock_completion.choices = [
-        MagicMock(message=MagicMock(content="Mocked LLM response"))
+        MagicMock(message=MagicMock(content='{"score": 0.85, "confidence": 0.9, "reasoning": "Mock evaluation"}'))
     ]
     mock_completion.usage = MagicMock(
         prompt_tokens=100,
@@ -82,14 +82,36 @@ def mock_openai_client():
         total_tokens=150
     )
     
-    mock_client.chat.completions.create.return_value = mock_completion
+    # Make create() async
+    async def async_create(*args, **kwargs):
+        return mock_completion
     
-    # Mock embeddings
+    mock_client.chat.completions.create = AsyncMock(side_effect=async_create)
+    
+    # Mock embeddings (async)
     mock_embedding = MagicMock()
     mock_embedding.data = [MagicMock(embedding=[0.1] * 1536)]
-    mock_client.embeddings.create.return_value = mock_embedding
+    
+    async def async_embed(*args, **kwargs):
+        return mock_embedding
+    
+    mock_client.embeddings.create = AsyncMock(side_effect=async_embed)
     
     return mock_client
+
+
+@pytest.fixture
+def real_openai_client():
+    """REAL OpenAI client for LLM tribunal tests."""
+    import os
+    from openai import AsyncOpenAI
+    
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        pytest.skip("OPENAI_API_KEY not set - skipping real LLM tests")
+    
+    client = AsyncOpenAI(api_key=api_key)
+    return client
 
 
 @pytest.fixture
