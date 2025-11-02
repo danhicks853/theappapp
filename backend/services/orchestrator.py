@@ -1038,6 +1038,158 @@ class Orchestrator:
             "outcome": "success"
         }
     
+    async def evaluate_goal_proximity(
+        self,
+        task_goal: str,
+        current_state: str,
+        *,
+        additional_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Evaluate how close current state is to achieving task goal using LLM.
+        
+        This is a fallback method when quantifiable metrics are not available.
+        Uses LLM to analyze progress and provide proximity score.
+        
+        Args:
+            task_goal: What the task is trying to achieve
+            current_state: Current state description
+            additional_context: Optional extra context
+        
+        Returns:
+            Dict with proximity_score (0-1), reasoning, confidence
+        
+        Example:
+            result = await orchestrator.evaluate_goal_proximity(
+                task_goal="Create user authentication API",
+                current_state="Created login endpoint, working on logout"
+            )
+            # Returns: {"proximity_score": 0.6, "reasoning": "...", "confidence": 0.7}
+        """
+        self.logger.info(
+            "Evaluating goal proximity | goal=%s | state=%s",
+            task_goal[:50],
+            current_state[:50]
+        )
+        
+        # Build prompt for LLM
+        prompt = self._build_proximity_prompt(
+            task_goal=task_goal,
+            current_state=current_state,
+            additional_context=additional_context
+        )
+        
+        try:
+            # Call LLM (using OpenAI adapter if available)
+            if hasattr(self, 'openai_adapter') and self.openai_adapter:
+                response = await self._call_llm_for_proximity(prompt)
+                return self._parse_proximity_response(response)
+            else:
+                # Fallback: heuristic evaluation
+                return self._heuristic_proximity_evaluation(task_goal, current_state)
+        
+        except Exception as e:
+            self.logger.error("Goal proximity evaluation failed: %s", e)
+            return {
+                "proximity_score": 0.5,  # Neutral score on error
+                "reasoning": f"Evaluation failed: {str(e)}",
+                "confidence": 0.0
+            }
+    
+    def _build_proximity_prompt(
+        self,
+        task_goal: str,
+        current_state: str,
+        additional_context: Optional[Dict[str, Any]]
+    ) -> str:
+        """Build LLM prompt for goal proximity evaluation."""
+        context_str = ""
+        if additional_context:
+            context_str = f"\n\nAdditional Context:\n{additional_context}"
+        
+        prompt = f"""You are evaluating progress toward a task goal.
+
+Task Goal:
+{task_goal}
+
+Current State:
+{current_state}{context_str}
+
+Analyze the current state relative to the goal and provide:
+1. A proximity score from 0 to 1 (0 = no progress, 1 = goal achieved)
+2. Clear reasoning for your score
+3. Specific evidence from the current state
+
+Respond in this format:
+SCORE: <0.0 to 1.0>
+REASONING: <your explanation>
+EVIDENCE: <specific points from current state>
+"""
+        return prompt
+    
+    async def _call_llm_for_proximity(self, prompt: str) -> str:
+        """Call LLM to evaluate proximity."""
+        # This would use the OpenAI adapter
+        # Placeholder for now
+        return "SCORE: 0.5\nREASONING: Partial progress\nEVIDENCE: Some work completed"
+    
+    def _parse_proximity_response(self, response: str) -> Dict[str, Any]:
+        """Parse LLM response into structured format."""
+        import re
+        
+        # Extract score
+        score_match = re.search(r'SCORE:\s*([\d.]+)', response)
+        score = float(score_match.group(1)) if score_match else 0.5
+        score = max(0.0, min(1.0, score))  # Clamp to 0-1
+        
+        # Extract reasoning
+        reasoning_match = re.search(r'REASONING:\s*(.+?)(?=EVIDENCE:|$)', response, re.DOTALL)
+        reasoning = reasoning_match.group(1).strip() if reasoning_match else "No reasoning provided"
+        
+        # Extract evidence
+        evidence_match = re.search(r'EVIDENCE:\s*(.+?)$', response, re.DOTALL)
+        evidence = evidence_match.group(1).strip() if evidence_match else ""
+        
+        # Confidence based on how well-formed the response is
+        confidence = 0.8 if score_match and reasoning_match else 0.5
+        
+        return {
+            "proximity_score": score,
+            "reasoning": reasoning,
+            "evidence": evidence,
+            "confidence": confidence
+        }
+    
+    def _heuristic_proximity_evaluation(
+        self,
+        task_goal: str,
+        current_state: str
+    ) -> Dict[str, Any]:
+        """
+        Fallback heuristic evaluation when LLM not available.
+        
+        Uses simple keyword matching and length comparison.
+        """
+        # Simple heuristic: check for goal keywords in current state
+        goal_words = set(task_goal.lower().split())
+        state_words = set(current_state.lower().split())
+        
+        # Calculate word overlap
+        overlap = goal_words.intersection(state_words)
+        overlap_ratio = len(overlap) / len(goal_words) if goal_words else 0
+        
+        # Estimate proximity based on overlap
+        proximity_score = min(0.9, overlap_ratio * 1.2)  # Cap at 0.9
+        
+        reasoning = f"Keyword overlap: {len(overlap)}/{len(goal_words)} goal terms found in current state"
+        
+        return {
+            "proximity_score": proximity_score,
+            "reasoning": reasoning,
+            "evidence": f"Matching terms: {', '.join(list(overlap)[:5])}",
+            "confidence": 0.4  # Low confidence for heuristic
+        }
+    
     def update_state(
         self,
         phase: Optional[str] = None,

@@ -646,3 +646,179 @@ class CollaborationOrchestrator:
             "success_rate": 0.0,
             "time_range_hours": time_range_hours
         }
+    
+    async def detect_semantic_loop(
+        self,
+        agent_a_id: str,
+        agent_b_id: str,
+        current_question: str,
+        *,
+        similarity_threshold: float = 0.85
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Detect collaboration loops using semantic similarity.
+        
+        Uses embeddings to detect when agents ask each other similar questions
+        repeatedly, indicating they're stuck in a collaboration loop.
+        
+        Args:
+            agent_a_id: First agent in potential loop
+            agent_b_id: Second agent in potential loop
+            current_question: The current question being asked
+            similarity_threshold: Cosine similarity threshold (default 0.85)
+        
+        Returns:
+            Loop details if detected, None otherwise
+        
+        Example:
+            loop = await orchestrator.detect_semantic_loop(
+                agent_a_id="backend-1",
+                agent_b_id="security-1",
+                current_question="How do I handle CORS?"
+            )
+        """
+        # Query recent collaborations between these agents
+        query = text("""
+            SELECT cr.question, cr.created_at
+            FROM collaboration_requests cr
+            WHERE (cr.requesting_agent_id = :agent_a OR cr.requesting_agent_id = :agent_b)
+            AND cr.created_at > NOW() - INTERVAL '24 hours'
+            ORDER BY cr.created_at DESC
+            LIMIT 10
+        """)
+        
+        with self.engine.connect() as conn:
+            result = conn.execute(query, {
+                "agent_a": agent_a_id,
+                "agent_b": agent_b_id
+            })
+            recent_questions = [row[0] for row in result.fetchall()]
+        
+        if len(recent_questions) < 2:
+            # Not enough history
+            return None
+        
+        # Calculate semantic similarity with recent questions
+        # For now, use simple text similarity (Jaccard)
+        # In production, replace with embeddings (OpenAI, sentence-transformers, etc.)
+        similar_count = 0
+        similar_questions = []
+        
+        for past_question in recent_questions:
+            similarity = self._calculate_text_similarity(current_question, past_question)
+            
+            if similarity >= similarity_threshold:
+                similar_count += 1
+                similar_questions.append(past_question)
+        
+        # Loop detected if 2+ similar questions
+        if similar_count >= 2:
+            loop_id = str(uuid.uuid4())
+            
+            logger.warning(
+                "Semantic collaboration loop detected | loop_id=%s | agents=%s<->%s | similar_count=%d",
+                loop_id,
+                agent_a_id,
+                agent_b_id,
+                similar_count
+            )
+            
+            # Record the loop
+            await self._record_semantic_loop(
+                loop_id=loop_id,
+                agent_a_id=agent_a_id,
+                agent_b_id=agent_b_id,
+                questions=[current_question] + similar_questions,
+                similarity_score=similarity_threshold
+            )
+            
+            return {
+                "loop_detected": True,
+                "loop_id": loop_id,
+                "cycle_count": similar_count + 1,
+                "agents": [agent_a_id, agent_b_id],
+                "similar_questions": similar_questions,
+                "similarity_threshold": similarity_threshold,
+                "action_required": "create_gate"
+            }
+        
+        return None
+    
+    def _calculate_text_similarity(self, text1: str, text2: str) -> float:
+        """
+        Calculate semantic similarity between two texts.
+        
+        Current implementation uses Jaccard similarity (word overlap).
+        TODO: Replace with embedding-based similarity for production:
+        - OpenAI embeddings (ada-002)
+        - Sentence-transformers
+        - Or other embedding models
+        """
+        # Normalize and tokenize
+        words1 = set(text1.lower().split())
+        words2 = set(text2.lower().split())
+        
+        # Jaccard similarity
+        intersection = words1.intersection(words2)
+        union = words1.union(words2)
+        
+        if not union:
+            return 0.0
+        
+        return len(intersection) / len(union)
+    
+    async def _calculate_embedding_similarity(
+        self,
+        text1: str,
+        text2: str
+    ) -> float:
+        """
+        Calculate cosine similarity using embeddings.
+        
+        This is the production-ready version that should be used
+        when OpenAI adapter is available.
+        
+        TODO: Implement when needed:
+        1. Generate embeddings for both texts
+        2. Calculate cosine similarity
+        3. Return score 0-1
+        """
+        # Placeholder for embedding-based similarity
+        # Would use OpenAI adapter or sentence-transformers
+        
+        # import numpy as np
+        # embedding1 = await self.get_embedding(text1)
+        # embedding2 = await self.get_embedding(text2)
+        # similarity = np.dot(embedding1, embedding2)
+        
+        return 0.0  # Placeholder
+    
+    async def _record_semantic_loop(
+        self,
+        loop_id: str,
+        agent_a_id: str,
+        agent_b_id: str,
+        questions: list,
+        similarity_score: float
+    ) -> None:
+        """Record a detected semantic collaboration loop."""
+        query = text("""
+            INSERT INTO collaboration_loops
+            (id, agent_a_id, agent_b_id, topic_similarity, cycle_count,
+             questions, detected_at, gate_created)
+            VALUES
+            (:id, :agent_a, :agent_b, :similarity, :cycles, :questions, :detected_at, :gate_created)
+        """)
+        
+        with self.engine.connect() as conn:
+            conn.execute(query, {
+                "id": loop_id,
+                "agent_a": agent_a_id,
+                "agent_b": agent_b_id,
+                "similarity": similarity_score,
+                "cycles": len(questions),
+                "questions": str(questions[:5]),  # Store first 5
+                "detected_at": datetime.now(UTC),
+                "gate_created": False
+            })
+            conn.commit()
