@@ -28,6 +28,9 @@ from backend.models.agent_state import (
     ValidationResult,
 )
 from backend.services.loop_detector import LoopDetector
+from backend.services.openai_adapter import OpenAIAdapter
+from backend.services.rag_service import RAGService
+from backend.services.search_service import SearchService
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,10 @@ class BaseAgent(ABC):
         confidence_check_interval: int = 5,
         max_retries: int = 3,
         loop_detector: Optional[Any] = None,
+        openai_adapter: Optional[OpenAIAdapter] = None,
+        rag_service: Optional[RAGService] = None,
+        search_service: Optional[SearchService] = None,
+        system_prompt: Optional[str] = None,
     ) -> None:
         self.agent_id = agent_id
         self.agent_type = agent_type
@@ -72,6 +79,12 @@ class BaseAgent(ABC):
         self.max_retries = max_retries
         self.loop_detector = loop_detector or LoopDetector()
         self.logger = logging.getLogger(f"agents.{self.agent_type}")
+        
+        # MVP: New services for specialists
+        self.openai_adapter = openai_adapter
+        self.rag_service = rag_service
+        self.search_service = search_service
+        self.system_prompt = system_prompt
 
     async def run_task(self, task: Any) -> TaskResult:
         """Execute a task using the iterative execution loop."""
@@ -562,6 +575,49 @@ class BaseAgent(ABC):
         """Compute exponential backoff duration."""
 
         return float(2 ** attempt)
+
+    # MVP: Helper methods for specialists
+    async def search_knowledge_base(self, query: str, limit: int = 5) -> list:
+        """Search specialist's RAG knowledge base.
+        
+        MVP: Used by specialists to reference uploaded documentation.
+        """
+        if not self.rag_service:
+            self.logger.debug("No RAG service configured for this agent")
+            return []
+        
+        try:
+            results = await self.rag_service.search(
+                query=query,
+                specialist_id=self.agent_id,
+                limit=limit
+            )
+            self.logger.info(f"Found {len(results)} knowledge base results for: {query}")
+            return [{"text": r.text, "score": r.score, "metadata": r.metadata} for r in results]
+        except Exception as e:
+            self.logger.error(f"Knowledge base search failed: {e}")
+            return []
+    
+    async def search_web(self, query: str, search_config: Optional[Dict[str, Any]] = None) -> list:
+        """Search the web with specialist-specific configuration.
+        
+        MVP: Used by specialists with scoped web search enabled.
+        """
+        if not self.search_service:
+            self.logger.debug("No search service configured for this agent")
+            return []
+        
+        try:
+            if search_config:
+                results = await self.search_service.search_with_config(query, search_config)
+            else:
+                results = await self.search_service.search(query)
+            
+            self.logger.info(f"Found {len(results)} web results for: {query}")
+            return [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in results]
+        except Exception as e:
+            self.logger.error(f"Web search failed: {e}")
+            return []
 
     @staticmethod
     def _extract_task_payload(task: Any) -> Dict[str, Any]:
