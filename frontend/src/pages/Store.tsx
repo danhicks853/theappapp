@@ -51,14 +51,14 @@ export default function Store() {
   ).sort();
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
+    <div className="min-h-screen bg-slate-950 p-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
+          <h1 className="text-4xl font-bold text-white mb-2">
             🏪 TheAppApp App Store
           </h1>
-          <p className="text-xl text-gray-600">
+          <p className="text-xl text-slate-300">
             Browse and install pre-built specialists for your team
           </p>
         </div>
@@ -69,8 +69,8 @@ export default function Store() {
             onClick={() => setSearchTags('')}
             className={`px-4 py-2 rounded-lg ${
               searchTags === ''
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-700 hover:bg-gray-100'
+                ? 'bg-navy-600 text-white shadow-lg'
+                : 'bg-navy-800 border border-navy-700 text-slate-300 hover:bg-navy-700'
             }`}
           >
             All
@@ -81,8 +81,8 @@ export default function Store() {
               onClick={() => setSearchTags(tag)}
               className={`px-4 py-2 rounded-lg ${
                 searchTags === tag
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-100'
+                  ? 'bg-navy-600 text-white shadow-lg'
+                  : 'bg-navy-800 border border-navy-700 text-slate-300 hover:bg-navy-700'
               }`}
             >
               {tag}
@@ -93,8 +93,8 @@ export default function Store() {
         {/* Loading State */}
         {loading && (
           <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading specialists...</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-navy-500 mx-auto"></div>
+            <p className="mt-4 text-slate-300">Loading specialists...</p>
           </div>
         )}
 
@@ -104,7 +104,7 @@ export default function Store() {
             {templates.map(template => (
               <div
                 key={template.template_id}
-                className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow cursor-pointer"
+                className="bg-navy-900 border border-navy-800 rounded-lg shadow-lg p-6 hover:shadow-navy-600/20 hover:border-navy-700 transition-all cursor-pointer"
                 onClick={() => setSelectedTemplate(template)}
               >
                 {/* Avatar */}
@@ -117,18 +117,18 @@ export default function Store() {
                 </div>
 
                 {/* Name & Role */}
-                <h3 className="text-xl font-bold text-center text-gray-900">
+                <h3 className="text-xl font-bold text-center text-white">
                   {template.display_name}
                 </h3>
-                <p className="text-blue-600 text-center font-medium mb-2">
+                <p className="text-navy-400 text-center font-medium mb-2">
                   {template.name}
                 </p>
-                <p className="text-sm text-gray-500 text-center mb-4">
+                <p className="text-sm text-slate-400 text-center mb-4">
                   v{template.current_version} • by {template.author}
                 </p>
 
                 {/* Bio */}
-                <p className="text-gray-700 text-sm italic mb-4 line-clamp-3">
+                <p className="text-slate-300 text-sm italic mb-4 line-clamp-3">
                   "{template.bio}"
                 </p>
 
@@ -137,7 +137,7 @@ export default function Store() {
                   {template.tags.slice(0, 3).map(tag => (
                     <span
                       key={tag}
-                      className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded"
+                      className="px-2 py-1 bg-navy-800 text-slate-300 text-xs rounded border border-navy-700"
                     >
                       {tag}
                     </span>
@@ -151,7 +151,7 @@ export default function Store() {
                     handleInstall(template.template_id);
                   }}
                   disabled={installing}
-                  className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  className="w-full bg-navy-600 text-white py-2 rounded-lg hover:bg-navy-500 disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-lg hover:shadow-navy-500/30 transition-all"
                 >
                   {installing ? 'Installing...' : 'Install TheAppApp App'}
                 </button>
@@ -163,10 +163,10 @@ export default function Store() {
         {/* Empty State */}
         {!loading && templates.length === 0 && (
           <div className="text-center py-12">
-            <p className="text-gray-600 text-lg">No specialists found with tag "{searchTags}"</p>
+            <p className="text-slate-300 text-lg">No specialists found with tag "{searchTags}"</p>
             <button
               onClick={() => setSearchTags('')}
-              className="mt-4 text-blue-600 hover:underline"
+              className="mt-4 text-navy-400 hover:text-navy-300 hover:underline"
             >
               View all specialists
             </button>
@@ -180,7 +180,7 @@ export default function Store() {
             onClick={() => setSelectedTemplate(null)}
           >
             <div
-              className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-8"
+              className="bg-navy-900 border border-navy-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-8"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
@@ -191,19 +191,19 @@ export default function Store() {
                   className="w-32 h-32 rounded-full mr-6"
                 />
                 <div className="flex-1">
-                  <h2 className="text-3xl font-bold text-gray-900">
+                  <h2 className="text-3xl font-bold text-white">
                     {selectedTemplate.display_name}
                   </h2>
-                  <p className="text-xl text-blue-600 font-medium">
+                  <p className="text-xl text-navy-400 font-medium">
                     {selectedTemplate.name}
                   </p>
-                  <p className="text-gray-500">
+                  <p className="text-slate-400">
                     v{selectedTemplate.current_version} • by {selectedTemplate.author}
                   </p>
                 </div>
                 <button
                   onClick={() => setSelectedTemplate(null)}
-                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                  className="text-slate-400 hover:text-white text-2xl"
                 >
                   ×
                 </button>
@@ -211,20 +211,20 @@ export default function Store() {
 
               {/* Description */}
               <div className="mb-6">
-                <h3 className="font-bold text-gray-900 mb-2">Description</h3>
-                <p className="text-gray-700">{selectedTemplate.description}</p>
+                <h3 className="font-bold text-white mb-2">Description</h3>
+                <p className="text-slate-300">{selectedTemplate.description}</p>
               </div>
 
               {/* Bio */}
               <div className="mb-6">
-                <h3 className="font-bold text-gray-900 mb-2">About</h3>
-                <p className="text-gray-700 italic">"{selectedTemplate.bio}"</p>
+                <h3 className="font-bold text-white mb-2">About</h3>
+                <p className="text-slate-300 italic">"{selectedTemplate.bio}"</p>
               </div>
 
               {/* Interests */}
               <div className="mb-6">
-                <h3 className="font-bold text-gray-900 mb-2">Interests</h3>
-                <ul className="list-disc list-inside text-gray-700">
+                <h3 className="font-bold text-white mb-2">Interests</h3>
+                <ul className="list-disc list-inside text-slate-300">
                   {selectedTemplate.interests.map((interest, i) => (
                     <li key={i}>{interest}</li>
                   ))}
@@ -233,23 +233,23 @@ export default function Store() {
 
               {/* Favorite Tool */}
               <div className="mb-6">
-                <h3 className="font-bold text-gray-900 mb-2">Favorite Tool</h3>
-                <p className="text-gray-700">{selectedTemplate.favorite_tool}</p>
+                <h3 className="font-bold text-white mb-2">Favorite Tool</h3>
+                <p className="text-slate-300">{selectedTemplate.favorite_tool}</p>
               </div>
 
               {/* Quote */}
-              <div className="mb-6 p-4 bg-gray-50 rounded-lg border-l-4 border-blue-600">
-                <p className="text-gray-700 italic">"{selectedTemplate.quote}"</p>
+              <div className="mb-6 p-4 bg-navy-800 rounded-lg border-l-4 border-navy-500">
+                <p className="text-slate-200 italic">"{selectedTemplate.quote}"</p>
               </div>
 
               {/* Tags */}
               <div className="mb-6">
-                <h3 className="font-bold text-gray-900 mb-2">Tags</h3>
+                <h3 className="font-bold text-white mb-2">Tags</h3>
                 <div className="flex flex-wrap gap-2">
                   {selectedTemplate.tags.map(tag => (
                     <span
                       key={tag}
-                      className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm"
+                      className="px-3 py-1 bg-navy-700 text-navy-200 rounded-full text-sm border border-navy-600"
                     >
                       {tag}
                     </span>
@@ -261,7 +261,7 @@ export default function Store() {
               <button
                 onClick={() => handleInstall(selectedTemplate.template_id)}
                 disabled={installing}
-                className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-lg"
+                className="w-full bg-navy-600 text-white py-3 rounded-lg hover:bg-navy-500 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-lg shadow-lg hover:shadow-navy-500/30 transition-all"
               >
                 {installing ? 'Installing...' : 'Install TheAppApp App'}
               </button>

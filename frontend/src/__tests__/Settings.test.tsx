@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Settings from "../pages/Settings";
 
@@ -12,7 +12,7 @@ it("loads and displays current autonomy level", async () => {
   mockFetch.mockResolvedValueOnce({
     ok: true,
     json: async () => ({ autonomy_level: "high" }),
-  });
+  } as Response);
 
   render(<Settings />);
 
@@ -26,11 +26,11 @@ it("updates autonomy level and persists to backend", async () => {
     .mockResolvedValueOnce({
       ok: true,
       json: async () => ({ autonomy_level: "medium" }),
-    })
+    } as Response)
     .mockResolvedValueOnce({
       ok: true,
       json: async () => ({ autonomy_level: "low" }),
-    });
+    } as Response);
 
   render(<Settings />);
 

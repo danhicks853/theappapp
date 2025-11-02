@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Generator
 
 from sqlalchemy import MetaData, Table, create_engine
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, Connection
 
 from backend.services.settings_service import SettingsService
 
@@ -40,6 +40,22 @@ def get_engine() -> Generator[Engine, None, None]:
     if _engine is None:
         raise RuntimeError("Database engine not initialized. Call initialize_engine() first.")
     yield _engine
+
+
+def get_db() -> Generator[Connection, None, None]:
+    """FastAPI dependency for database connection.
+
+    Yields:
+        A SQLAlchemy database connection
+
+    Raises:
+        RuntimeError: If engine has not been initialized
+    """
+    if _engine is None:
+        raise RuntimeError("Database engine not initialized. Call initialize_engine() first.")
+    
+    with _engine.connect() as connection:
+        yield connection
 
 
 def get_settings_service() -> Generator[SettingsService, None, None]:

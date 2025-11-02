@@ -85,21 +85,21 @@ export default function Projects() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900 mb-2">
+            <h1 className="text-4xl font-bold text-white mb-2">
               📁 Projects
             </h1>
-            <p className="text-xl text-gray-600">
+            <p className="text-xl text-blue-200">
               Manage your AI-powered projects
             </p>
           </div>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium"
+            className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium shadow-lg"
           >
             + New Project
           </button>
@@ -108,8 +108,8 @@ export default function Projects() {
         {/* Loading State */}
         {loading && (
           <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading projects...</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400 mx-auto"></div>
+            <p className="mt-4 text-blue-200">Loading projects...</p>
           </div>
         )}
 
@@ -121,7 +121,7 @@ export default function Projects() {
               return (
                 <div
                   key={project.id}
-                  className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow"
+                  className="bg-slate-800/50 backdrop-blur-sm rounded-lg shadow-md p-6 hover:shadow-xl hover:bg-slate-800/70 transition-all border border-slate-700"
                 >
                   {/* Status Badge */}
                   <div className="flex justify-between items-start mb-4">
@@ -139,18 +139,18 @@ export default function Projects() {
                   </div>
 
                   {/* Project Name */}
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">
+                  <h3 className="text-xl font-bold text-white mb-2">
                     {project.name}
                   </h3>
 
                   {/* Description */}
-                  <p className="text-gray-600 text-sm mb-4 line-clamp-2">
+                  <p className="text-blue-200 text-sm mb-4 line-clamp-2">
                     {project.description}
                   </p>
 
                   {/* Specialists */}
                   <div className="mb-4">
-                    <p className="text-xs text-gray-500 mb-2">Team:</p>
+                    <p className="text-xs text-blue-300 mb-2">Team:</p>
                     <div className="flex -space-x-2">
                       {projectSpecialists.slice(0, 5).map(specialist => (
                         <img
@@ -170,7 +170,7 @@ export default function Projects() {
                   </div>
 
                   {/* View Button */}
-                  <button className="w-full bg-gray-100 text-gray-700 py-2 rounded-lg hover:bg-gray-200 font-medium">
+                  <button className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 font-medium shadow-md">
                     View Project
                   </button>
                 </div>
@@ -181,13 +181,13 @@ export default function Projects() {
 
         {/* Empty State */}
         {!loading && projects.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-gray-600 text-lg mb-4">
+          <div className="text-center py-12 bg-slate-800/30 rounded-lg border border-slate-700">
+            <p className="text-blue-200 text-lg mb-4">
               No projects yet. Create your first project to get started!
             </p>
             <button
               onClick={() => setShowCreateModal(true)}
-              className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium"
+              className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 font-medium shadow-lg"
             >
               + Create First Project
             </button>
@@ -201,22 +201,22 @@ export default function Projects() {
             onClick={() => setShowCreateModal(false)}
           >
             <div
-              className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-8"
+              className="bg-slate-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-8 border border-slate-700"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
               <div className="flex justify-between items-start mb-6">
                 <div>
-                  <h2 className="text-3xl font-bold text-gray-900">
+                  <h2 className="text-3xl font-bold text-white">
                     Create New Project
                   </h2>
-                  <p className="text-gray-600">
+                  <p className="text-blue-200">
                     Assign specialists to work on this project
                   </p>
                 </div>
                 <button
                   onClick={() => setShowCreateModal(false)}
-                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                  className="text-blue-300 hover:text-white text-2xl"
                 >
                   ×
                 </button>
@@ -226,7 +226,7 @@ export default function Projects() {
               <div className="space-y-6">
                 {/* Project Name */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-blue-200 mb-2">
                     Project Name *
                   </label>
                   <input
@@ -234,13 +234,13 @@ export default function Projects() {
                     value={projectName}
                     onChange={(e) => setProjectName(e.target.value)}
                     placeholder="Customer Portal Redesign"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
 
                 {/* Project Description */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-blue-200 mb-2">
                     Description
                   </label>
                   <textarea
@@ -248,23 +248,23 @@ export default function Projects() {
                     onChange={(e) => setProjectDescription(e.target.value)}
                     placeholder="Rebuild the customer portal with modern UI/UX and improved performance..."
                     rows={4}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
 
                 {/* Select Specialists */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-blue-200 mb-2">
                     Select Specialists * ({selectedSpecialistIds.length} selected)
                   </label>
                   {specialists.length === 0 ? (
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                      <p className="text-yellow-800">
+                    <div className="bg-yellow-900/30 border border-yellow-700 rounded-lg p-4">
+                      <p className="text-yellow-200">
                         No specialists available. Install specialists from TheAppApp App Store first.
                       </p>
                       <a
                         href="/store"
-                        className="text-blue-600 hover:underline mt-2 inline-block"
+                        className="text-blue-400 hover:underline mt-2 inline-block"
                       >
                         Browse Store →
                       </a>
@@ -277,8 +277,8 @@ export default function Projects() {
                           onClick={() => toggleSpecialist(specialist.id)}
                           className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
                             selectedSpecialistIds.includes(specialist.id)
-                              ? 'border-blue-600 bg-blue-50'
-                              : 'border-gray-200 hover:border-gray-300'
+                              ? 'border-blue-500 bg-blue-900/30'
+                              : 'border-slate-600 bg-slate-700/50 hover:border-slate-500'
                           }`}
                         >
                           <div className="flex items-center">
@@ -288,15 +288,15 @@ export default function Projects() {
                               className="w-12 h-12 rounded-full mr-3"
                             />
                             <div className="flex-1">
-                              <p className="font-bold text-gray-900">
+                              <p className="font-bold text-white">
                                 {specialist.display_name || specialist.name}
                               </p>
-                              <p className="text-sm text-gray-600">
+                              <p className="text-sm text-blue-300">
                                 {specialist.name}
                               </p>
                             </div>
                             {selectedSpecialistIds.includes(specialist.id) && (
-                              <span className="text-blue-600 text-xl">✓</span>
+                              <span className="text-blue-400 text-xl">✓</span>
                             )}
                           </div>
                         </div>
@@ -310,14 +310,14 @@ export default function Projects() {
               <div className="flex gap-3 mt-8">
                 <button
                   onClick={() => setShowCreateModal(false)}
-                  className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-lg hover:bg-gray-200 font-medium"
+                  className="flex-1 bg-slate-700 text-white py-3 rounded-lg hover:bg-slate-600 font-medium"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleCreate}
                   disabled={creating || !projectName.trim() || selectedSpecialistIds.length === 0}
-                  className="flex-1 bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                  className="flex-1 bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-lg"
                 >
                   {creating ? 'Creating...' : 'Create Project'}
                 </button>

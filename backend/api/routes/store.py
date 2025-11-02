@@ -70,7 +70,7 @@ def get_specialist_service():
 
 
 @router.get("/specialists", response_model=List[TemplateResponse])
-async def list_store_specialists(
+def list_store_specialists(
     tags: Optional[str] = None,
     store: StoreService = Depends(get_store_service)
 ):
@@ -78,14 +78,30 @@ async def list_store_specialists(
     Browse TheAppApp App Store.
     
     Lists all available pre-built specialist templates.
-    
-    Query params:
-    - tags: Comma-separated list of tags to filter by
+    Filters out specialists that are already installed.
     """
+    from backend.api.dependencies import _engine
+    from sqlalchemy import text
+    
     tag_list = tags.split(",") if tags else None
     templates = store.list_templates(tags=tag_list)
     
-    return [TemplateResponse(**template.__dict__) for template in templates]
+    # Get already installed template IDs
+    installed_template_ids = set()
+    if _engine is not None:
+        try:
+            with _engine.connect() as conn:
+                result = conn.execute(
+                    text("SELECT DISTINCT template_id FROM specialists WHERE template_id IS NOT NULL")
+                )
+                installed_template_ids = {row[0] for row in result.fetchall()}
+        except Exception:
+            pass  # If error, just show all templates
+    
+    # Filter out already installed templates
+    available_templates = [t for t in templates if t.template_id not in installed_template_ids]
+    
+    return [TemplateResponse(**template.__dict__) for template in available_templates]
 
 
 @router.get("/specialists/{template_id}", response_model=TemplateResponse)
@@ -132,66 +148,77 @@ async def get_template_version(
 
 
 @router.post("/specialists/{template_id}/install", status_code=201)
-async def install_specialist(
+def install_specialist(
     template_id: str,
     request: InstallRequest,
-    db: AsyncSession = Depends(get_db),
     store: StoreService = Depends(get_store_service),
-    specialist_service: SpecialistService = Depends(get_specialist_service)
 ):
     """
     Install a specialist from TheAppApp App Store.
     
     Creates a new specialist instance based on the template.
     """
+    from backend.api.dependencies import _engine
+    from sqlalchemy import text
+    import uuid
+    
+    if _engine is None:
+        raise HTTPException(status_code=500, detail="Database engine not initialized")
+    
     try:
         # Get installation data from store
         install_data = store.install_template(template_id, request.version)
         
-        # Create specialist using specialist service
-        specialist = await specialist_service.create_specialist(
-            name=install_data["name"],
-            description=install_data["description"],
-            system_prompt=install_data["system_prompt"],
-            scope=install_data["scope"],
-            web_search_enabled=install_data["web_search_enabled"],
-            web_search_config=install_data["web_search_config"],
-            tools_enabled=install_data["tools_enabled"],
-            db=db
-        )
+        # Create specialist directly with engine
+        specialist_id = str(uuid.uuid4())
         
-        # Update with store-specific fields
-        await db.execute(
-            """
-            UPDATE specialists 
-            SET version = :version,
-                template_id = :template_id,
-                installed_from_store = :from_store,
-                display_name = :display_name,
-                avatar = :avatar,
-                bio = :bio,
-                interests = :interests,
-                favorite_tool = :favorite_tool,
-                quote = :quote
-            WHERE id = :id
-            """,
-            {
-                "id": specialist.id,
-                "version": install_data["version"],
-                "template_id": install_data["template_id"],
-                "from_store": install_data["installed_from_store"],
-                "display_name": install_data["display_name"],
-                "avatar": install_data["avatar"],
-                "bio": install_data["bio"],
-                "interests": install_data["interests"],
-                "favorite_tool": install_data["favorite_tool"],
-                "quote": install_data["quote"]
-            }
-        )
-        await db.commit()
+        with _engine.connect() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO specialists (
+                        id, name, description, system_prompt, scope, 
+                        web_search_enabled, web_search_config, tools_enabled,
+                        version, template_id, installed_from_store,
+                        display_name, avatar, bio, interests, favorite_tool, quote,
+                        status, tags, model, temperature, max_tokens, required
+                    ) VALUES (
+                        :id, :name, :description, :system_prompt, :scope,
+                        :web_search_enabled, :web_search_config, :tools_enabled,
+                        :version, :template_id, :installed_from_store,
+                        :display_name, :avatar, :bio, :interests, :favorite_tool, :quote,
+                        :status, :tags, :model, :temperature, :max_tokens, :required
+                    )
+                """),
+                {
+                    "id": specialist_id,
+                    "name": install_data["name"],
+                    "description": install_data["description"],
+                    "system_prompt": install_data["system_prompt"],
+                    "scope": install_data.get("scope", "global"),
+                    "web_search_enabled": install_data.get("web_search_enabled", False),
+                    "web_search_config": install_data.get("web_search_config"),
+                    "tools_enabled": install_data.get("tools_enabled"),
+                    "version": install_data["version"],
+                    "template_id": install_data["template_id"],
+                    "installed_from_store": True,
+                    "display_name": install_data["display_name"],
+                    "avatar": install_data["avatar"],
+                    "bio": install_data["bio"],
+                    "interests": install_data.get("interests", []),
+                    "favorite_tool": install_data["favorite_tool"],
+                    "quote": install_data["quote"],
+                    "status": "active",
+                    "tags": install_data.get("tags", []),
+                    "model": install_data.get("model", "gpt-4"),
+                    "temperature": float(install_data.get("temperature", 0.7)),
+                    "max_tokens": int(install_data.get("max_tokens", 4000)),
+                    "required": False
+                }
+            )
+            conn.commit()
         
         return {
-            "specialist_id": specialist.id,
+            "specialist_id": specialist_id,
             "template_id": template_id,
             "version": install_data["version"],
             "message": f"Successfully installed {install_data['display_name']}!"
@@ -200,7 +227,12 @@ async def install_specialist(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error installing specialist: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Installation failed: {str(e)}")
 
 
 @router.post("/specialists/{template_id}/check-update")

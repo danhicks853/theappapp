@@ -114,12 +114,10 @@ async def create_specialist(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("", response_model=List[SpecialistResponse])
-async def list_specialists(
+@router.get("", response_model=List[dict])
+def list_specialists(
     scope: Optional[str] = None,
     project_id: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
-    service: SpecialistService = Depends(get_specialist_service)
 ):
     """
     List all specialists with optional filtering.
@@ -128,13 +126,72 @@ async def list_specialists(
     - scope: Filter by 'global' or 'project'
     - project_id: Filter by project ID
     """
-    specialists = await service.list_specialists(
-        scope=scope,
-        project_id=project_id,
-        db=db
-    )
+    from backend.api.dependencies import _engine
+    from sqlalchemy import text
     
-    return [SpecialistResponse(**s.__dict__) for s in specialists]
+    if _engine is None:
+        raise HTTPException(status_code=500, detail="Database engine not initialized")
+    
+    with _engine.connect() as conn:
+        # Build query with filters
+        where_clauses = []
+        params = {}
+        
+        if scope:
+            where_clauses.append("scope = :scope")
+            params["scope"] = scope
+        if project_id:
+            where_clauses.append("project_id = :project_id")
+            params["project_id"] = project_id
+        
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        
+        query = text(f"""
+            SELECT id, name, description, system_prompt, scope, project_id,
+                   web_search_enabled, web_search_config, tools_enabled,
+                   created_at, updated_at, version, template_id, installed_from_store,
+                   display_name, avatar, bio, interests, favorite_tool, quote, required,
+                   status, tags, model, temperature, max_tokens
+            FROM specialists
+            {where_sql}
+            ORDER BY required DESC, created_at DESC
+        """)
+        
+        result = conn.execute(query, params)
+        rows = result.fetchall()
+        
+        specialists = []
+        for row in rows:
+            specialists.append({
+                "id": str(row[0]),
+                "name": row[1],
+                "description": row[2],
+                "system_prompt": row[3],
+                "scope": row[4] or "global",
+                "project_id": str(row[5]) if row[5] else None,
+                "web_search_enabled": row[6] or False,
+                "web_search_config": row[7],
+                "tools_enabled": row[8],
+                "created_at": row[9].isoformat() if row[9] else None,
+                "updated_at": row[10].isoformat() if row[10] else None,
+                "version": row[11],
+                "template_id": row[12],
+                "installed_from_store": row[13] or False,
+                "display_name": row[14],
+                "avatar": row[15],
+                "bio": row[16],
+                "interests": row[17] if row[17] else [],
+                "favorite_tool": row[18],
+                "quote": row[19],
+                "required": row[20] or False,
+                "status": row[21] or "active",
+                "tags": row[22] if row[22] else [],
+                "model": row[23] or "gpt-4",
+                "temperature": float(row[24]) if row[24] else 0.7,
+                "max_tokens": row[25] or 4000,
+            })
+        
+        return specialists
 
 
 @router.get("/{specialist_id}", response_model=SpecialistResponse)
@@ -198,6 +255,48 @@ async def generate_prompt(
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{specialist_id}", status_code=204)
+def delete_specialist(
+    specialist_id: str,
+):
+    """
+    Delete a specialist.
+    
+    Cannot delete required specialists (frontend_developer, backend_developer, orchestrator).
+    """
+    from backend.api.dependencies import _engine
+    from sqlalchemy import text
+    
+    if _engine is None:
+        raise HTTPException(status_code=500, detail="Database engine not initialized")
+    
+    with _engine.connect() as conn:
+        # Check if specialist is required
+        result = conn.execute(
+            text("SELECT required FROM specialists WHERE id = :id"),
+            {"id": specialist_id}
+        )
+        row = result.fetchone()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Specialist not found")
+        
+        if row[0]:  # required is True
+            raise HTTPException(
+                status_code=403, 
+                detail="Cannot delete required specialists. Frontend Dev, Backend Dev, and Orchestrator are core to TheAppApp."
+            )
+        
+        # Delete the specialist
+        conn.execute(
+            text("DELETE FROM specialists WHERE id = :id"),
+            {"id": specialist_id}
+        )
+        conn.commit()
+    
+    return None
 
 
 @router.post("/{specialist_id}/documents", status_code=202)

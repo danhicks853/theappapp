@@ -241,6 +241,7 @@ class StoreService:
             "interests": template.interests,
             "favorite_tool": template.favorite_tool,
             "quote": template.quote,
+            "tags": template.tags,
             "version": version,
             "template_id": template_id,
             "installed_from_store": True,

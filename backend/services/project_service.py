@@ -152,7 +152,7 @@ class ProjectService:
             ORDER BY created_at DESC
         """)
         
-        result = await db.execute(query, params)
+        result = db.execute(query, params)
         rows = result.fetchall()
         
         # Get specialists for each project
@@ -166,7 +166,7 @@ class ProjectService:
                 WHERE project_id = :project_id
             """)
             
-            specialists_result = await db.execute(specialists_query, {"project_id": project_id})
+            specialists_result = db.execute(specialists_query, {"project_id": project_id})
             specialist_ids = [str(r[0]) for r in specialists_result.fetchall()]
             
             projects.append(self._row_to_project(row, specialist_ids))

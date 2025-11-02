@@ -2,7 +2,7 @@
   "specialists": [
     {
       "template_id": "orchestrator",
-      "name": "Orchestrator",
+      "name": "orchestrator",
       "display_name": "Alex Chen",
       "avatar_seed": "alex-chen-orchestrator",
       "author": "TheAppApp",
@@ -16,7 +16,7 @@
     },
     {
       "template_id": "backend-developer",
-      "name": "Backend Developer",
+      "name": "backend_developer",
       "display_name": "Sarah Kim",
       "avatar_seed": "sarah-kim-backend",
       "author": "TheAppApp",
@@ -30,7 +30,7 @@
     },
     {
       "template_id": "frontend-developer",
-      "name": "Frontend Developer",
+      "name": "frontend_developer",
       "display_name": "Marcus Webb",
       "avatar_seed": "marcus-webb-frontend",
       "author": "TheAppApp",
@@ -44,7 +44,7 @@
     },
     {
       "template_id": "qa-engineer",
-      "name": "QA Engineer",
+      "name": "qa_engineer",
       "display_name": "Jordan Lee",
       "avatar_seed": "jordan-lee-qa",
       "author": "TheAppApp",
@@ -58,7 +58,7 @@
     },
     {
       "template_id": "devops-engineer",
-      "name": "DevOps Engineer",
+      "name": "devops_engineer",
       "display_name": "Taylor Diaz",
       "avatar_seed": "taylor-diaz-devops",
       "author": "TheAppApp",
@@ -72,7 +72,7 @@
     },
     {
       "template_id": "security-expert",
-      "name": "Security Expert",
+      "name": "security_expert",
       "display_name": "Casey Park",
       "avatar_seed": "casey-park-security",
       "author": "TheAppApp",
@@ -86,7 +86,7 @@
     },
     {
       "template_id": "github-specialist",
-      "name": "GitHub Specialist",
+      "name": "github_specialist",
       "display_name": "Riley Morgan",
       "avatar_seed": "riley-morgan-github",
       "author": "TheAppApp",
@@ -100,7 +100,7 @@
     },
     {
       "template_id": "project-manager",
-      "name": "Project Manager",
+      "name": "project_manager",
       "display_name": "Sam Patel",
       "avatar_seed": "sam-patel-pm",
       "author": "TheAppApp",

@@ -16,6 +16,12 @@ from typing import Optional
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
+load_dotenv(env_path)
 
 # Import application metadata here when available, e.g.:
 # from backend import models

@@ -2,7 +2,10 @@
  * API Client for TheAppApp Backend
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// In production (Docker), frontend and backend are on same host
+const API_BASE_URL = typeof window !== 'undefined' 
+  ? `${window.location.protocol}//${window.location.hostname}:8000`
+  : 'http://localhost:8000';
 
 export interface SpecialistTemplate {
   template_id: string;
@@ -42,6 +45,7 @@ export interface Specialist {
   interests?: string[];
   favorite_tool?: string;
   quote?: string;
+  required?: boolean;
 }
 
 export interface Project {
@@ -76,6 +80,11 @@ class ApiClient {
 
     if (!response.ok) {
       throw new Error(`API Error: ${response.statusText}`);
+    }
+
+    // Handle 204 No Content responses
+    if (response.status === 204) {
+      return undefined as T;
     }
 
     return response.json();
