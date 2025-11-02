@@ -1,9 +1,9 @@
 """
 Store API Routes
 
-The AppAppApp Store - browse and install pre-built specialists.
+TheAppApp App Store - browse and install pre-built specialists.
 
-Reference: The AppAppApp Store feature
+Reference: TheAppApp App Store feature
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
@@ -75,7 +75,7 @@ async def list_store_specialists(
     store: StoreService = Depends(get_store_service)
 ):
     """
-    Browse The AppAppApp Store.
+    Browse TheAppApp App Store.
     
     Lists all available pre-built specialist templates.
     
@@ -140,7 +140,7 @@ async def install_specialist(
     specialist_service: SpecialistService = Depends(get_specialist_service)
 ):
     """
-    Install a specialist from The AppAppApp Store.
+    Install a specialist from TheAppApp App Store.
     
     Creates a new specialist instance based on the template.
     """

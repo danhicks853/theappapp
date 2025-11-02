@@ -1,9 +1,9 @@
 """
 Store Service
 
-Manages The AppAppApp Store - catalog of pre-built specialist templates.
+Manages TheAppApp App Store - catalog of pre-built specialist templates.
 
-Reference: The AppAppApp Store feature
+Reference: TheAppApp App Store feature
 """
 import json
 import logging
@@ -50,7 +50,7 @@ class TemplateVersion:
 
 class StoreService:
     """
-    Service for managing The AppAppApp Store.
+    Service for managing TheAppApp App Store.
     
     Features:
     - Browse specialist catalog

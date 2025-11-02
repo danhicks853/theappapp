@@ -27,7 +27,7 @@ def create_app() -> FastAPI:
 
     # Register routers
     app.include_router(settings.router)
-    app.include_router(store.router)  # The AppAppApp Store!
+    app.include_router(store.router)  # TheAppApp App Store!
     app.include_router(specialists.router)
     app.include_router(projects.router)
     app.include_router(tasks.router)
