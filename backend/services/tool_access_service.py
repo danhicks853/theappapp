@@ -32,6 +32,7 @@ class ToolCategory(Enum):
     GITHUB = "github"
     DATABASE = "database"
     COMMUNICATION = "communication"
+    TESTING = "testing"
 
 
 class ToolExecutionRequest(BaseModel):
@@ -96,12 +97,20 @@ class ToolAccessService:
             "web_search": {"search"},
             "code_validator": {"validate"},
             "database": {"read", "write"},  # Via ORM only
+            "test_config_generator": {"generate_configs", "setup_backend", "setup_ci"},
+            "test_generator": {"generate_tests", "identify_coverage_gaps", "generate_edge_cases"},
+            "edge_case_finder": {"find_edge_cases", "prioritize_cases"},
+            "test_quality_scorer": {"score_test", "score_file", "generate_report"},
         },
         "frontend_dev": {
             "container": {"create", "destroy", "execute", "list"},
             "file_system": {"read", "write", "delete", "list"},
             "web_search": {"search"},
             "code_validator": {"validate"},
+            "test_config_generator": {"generate_configs", "setup_frontend", "setup_ci"},
+            "test_generator": {"generate_tests", "identify_coverage_gaps", "generate_edge_cases"},
+            "edge_case_finder": {"find_edge_cases", "prioritize_cases"},
+            "test_quality_scorer": {"score_test", "score_file", "generate_report"},
         },
         "workshopper": {
             "web_search": {"search"},
@@ -122,10 +131,23 @@ class ToolAccessService:
             "container": {"create", "destroy", "execute", "list"},
             "file_system": {"read", "list"},
             "web_search": {"search"},
+            "test_config_generator": {"generate_configs", "setup_backend", "setup_frontend", "setup_ci"},
+            "test_generator": {"generate_tests", "identify_coverage_gaps", "generate_edge_cases"},
+            "edge_case_finder": {"find_edge_cases", "prioritize_cases"},
+            "test_quality_scorer": {"score_test", "score_file", "generate_report"},
+            "test_maintainer": {"detect_changes", "suggest_updates", "generate_pr_comment"},
         },
         "github_specialist": {
             "github": {"create_repo", "delete_repo", "merge_pr", "list_repos"},
             "file_system": {"read", "list"},
+        },
+        "ui_ux": {
+            "file_system": {"read", "write", "list"},
+            "web_search": {"search"},
+            "test_config_generator": {"generate_configs", "setup_frontend", "setup_ci"},
+            "test_generator": {"generate_tests", "identify_coverage_gaps", "generate_edge_cases"},
+            "edge_case_finder": {"find_edge_cases", "prioritize_cases"},
+            "test_quality_scorer": {"score_test", "score_file", "generate_report"},
         }
     }
     
@@ -184,6 +206,31 @@ class ToolAccessService:
                 "category": ToolCategory.DATABASE,
                 "operations": ["read", "write"],
                 "handler": None
+            },
+            "test_config_generator": {
+                "category": ToolCategory.TESTING,
+                "operations": ["generate_configs", "setup_backend", "setup_frontend", "setup_ci"],
+                "handler": None  # Will be set to TestConfigGenerator
+            },
+            "test_generator": {
+                "category": ToolCategory.TESTING,
+                "operations": ["generate_tests", "identify_coverage_gaps", "generate_edge_cases"],
+                "handler": None  # Will be set to TestGenerator
+            },
+            "edge_case_finder": {
+                "category": ToolCategory.TESTING,
+                "operations": ["find_edge_cases", "prioritize_cases"],
+                "handler": None  # Will be set to EdgeCaseFinder
+            },
+            "test_quality_scorer": {
+                "category": ToolCategory.TESTING,
+                "operations": ["score_test", "score_file", "generate_report"],
+                "handler": None  # Will be set to TestQualityScorer
+            },
+            "test_maintainer": {
+                "category": ToolCategory.TESTING,
+                "operations": ["detect_changes", "suggest_updates", "generate_pr_comment"],
+                "handler": None  # Will be set to TestMaintainer
             }
         }
         return registry
