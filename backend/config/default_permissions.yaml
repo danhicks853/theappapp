@@ -1,0 +1,185 @@
+# Default Tool Access Permissions for AI Agents
+# Each agent type has specific permissions based on their role and responsibilities
+
+# Backend Developer Agent
+# Purpose: Python/FastAPI development, API creation, database operations
+backend_dev:
+  container:
+    - create
+    - destroy
+    - execute
+    - list
+  file_system:
+    - read
+    - write
+    - delete
+    - list
+  web_search:
+    - search
+  code_validator:
+    - validate
+  database:
+    - read
+    - write  # Via ORM only, no raw SQL
+  # Rationale: Backend devs need full container access for code execution,
+  # file system access for creating/editing code, search for documentation,
+  # validation for code quality, and database access via safe ORM methods
+
+# Frontend Developer Agent
+# Purpose: React/TypeScript development, UI/UX implementation
+frontend_dev:
+  container:
+    - create
+    - destroy
+    - execute
+    - list
+  file_system:
+    - read
+    - write
+    - delete
+    - list
+  web_search:
+    - search
+  code_validator:
+    - validate
+  # Rationale: Frontend devs need container access for npm/webpack operations,
+  # file system for component creation, search for UI libraries/docs,
+  # validation for code quality. No database access needed.
+
+# Workshopper Agent
+# Purpose: Requirement gathering, project scoping, architecture planning
+workshopper:
+  web_search:
+    - search
+  file_system:
+    - read
+    - list
+  # Rationale: Workshoppers need search for research and requirements,
+  # read-only file access to understand existing codebases.
+  # No code execution or modification permissions.
+
+# Security Expert Agent
+# Purpose: Security audits, vulnerability scanning, compliance checks
+security_expert:
+  web_search:
+    - search
+  file_system:
+    - read
+    - list
+  code_validator:
+    - validate
+  # Rationale: Security experts need search for CVE databases and security advisories,
+  # read-only access to audit code, validation to check for vulnerabilities.
+  # No modification or execution permissions for safety.
+
+# DevOps Engineer Agent
+# Purpose: Container orchestration, deployment, infrastructure management
+devops_engineer:
+  container:
+    - create
+    - destroy
+    - execute
+    - list
+  file_system:
+    - read
+    - write
+    - delete
+    - list
+  web_search:
+    - search
+  database:
+    - read
+  # Rationale: DevOps needs full container management for deployment pipelines,
+  # file system access for configuration files and scripts,
+  # search for deployment best practices,
+  # read-only database access for monitoring.
+
+# QA Engineer Agent
+# Purpose: Test creation, test execution, quality assurance
+qa_engineer:
+  container:
+    - create
+    - destroy
+    - execute
+    - list
+  file_system:
+    - read
+    - list
+  web_search:
+    - search
+  # Rationale: QA engineers need container access to run tests,
+  # read-only file access to review code and tests,
+  # search for testing frameworks and best practices.
+  # No write access to prevent accidental modifications.
+
+# GitHub Specialist Agent
+# Purpose: Repository management, PR workflows, GitHub operations
+github_specialist:
+  github:
+    - create_repo
+    - delete_repo
+    - merge_pr
+    - list_repos
+  file_system:
+    - read
+    - list
+  web_search:
+    - search
+  # Rationale: GitHub specialist needs full GitHub permissions for repo management,
+  # read-only file access to understand code for PR descriptions,
+  # search for GitHub API documentation and best practices.
+
+# Orchestrator (if implemented as an agent)
+# Purpose: Master coordinator, can delegate to any tool
+orchestrator:
+  container:
+    - create
+    - destroy
+    - execute
+    - list
+  file_system:
+    - read
+    - write
+    - delete
+    - list
+  web_search:
+    - search
+  code_validator:
+    - validate
+  database:
+    - read
+    - write
+  github:
+    - create_repo
+    - delete_repo
+    - merge_pr
+    - list_repos
+  # Rationale: Orchestrator has elevated permissions to coordinate all agents.
+  # Can access any tool but should primarily delegate to specialist agents.
+
+# Product Manager Agent (future)
+# Purpose: Feature prioritization, roadmap planning, stakeholder communication
+product_manager:
+  web_search:
+    - search
+  file_system:
+    - read
+    - list
+  # Rationale: PMs need research capabilities and read-only access to understand features.
+  # No code modification or execution permissions.
+
+# Documentation Writer Agent (future)
+# Purpose: Technical documentation, API docs, user guides
+documentation_writer:
+  web_search:
+    - search
+  file_system:
+    - read
+    - write
+    - list
+  code_validator:
+    - validate
+  # Rationale: Doc writers need search for best practices,
+  # file access to read code and write documentation,
+  # validation to ensure code examples work.
+  # No container execution or database access.

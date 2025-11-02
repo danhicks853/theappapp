@@ -35,6 +35,179 @@ from backend.services.search_service import SearchService
 logger = logging.getLogger(__name__)
 
 
+class TASClient:
+    """Tool Access Service client mixin for agents.
+    
+    Provides methods for agents to request tool access through TAS
+    with proper permission checking and denial handling.
+    """
+    
+    def __init__(self, agent_id: str, agent_type: str):
+        """Initialize TAS client.
+        
+        Args:
+            agent_id: Unique agent identifier
+            agent_type: Type of agent (backend_dev, etc.)
+        """
+        self.agent_id = agent_id
+        self.agent_type = agent_type
+        self._tas = None
+    
+    def _get_tas(self):
+        """Lazy load TAS service."""
+        if self._tas is None:
+            from backend.services.tool_access_service import get_tool_access_service
+            self._tas = get_tool_access_service()
+        return self._tas
+    
+    async def request_tool_access(
+        self,
+        tool_name: str,
+        operation: str,
+        parameters: Dict[str, Any],
+        project_id: Optional[str] = None,
+        task_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Request tool access through TAS.
+        
+        Args:
+            tool_name: Name of tool to access
+            operation: Operation to perform
+            parameters: Operation parameters
+            project_id: Associated project ID
+            task_id: Associated task ID
+        
+        Returns:
+            Tool execution result or denial message
+        """
+        from backend.services.tool_access_service import ToolExecutionRequest
+        
+        tas = self._get_tas()
+        
+        request = ToolExecutionRequest(
+            agent_id=self.agent_id,
+            agent_type=self.agent_type,
+            tool_name=tool_name,
+            operation=operation,
+            parameters=parameters,
+            project_id=project_id,
+            task_id=task_id
+        )
+        
+        response = await tas.execute_tool(request)
+        
+        return {
+            "allowed": response.allowed,
+            "success": response.success,
+            "result": response.result,
+            "message": response.message,
+            "audit_id": response.audit_id
+        }
+    
+    def validate_permission(
+        self,
+        tool_name: str,
+        operation: str
+    ) -> tuple[bool, str]:
+        """Validate permission without executing (dry-run).
+        
+        Args:
+            tool_name: Name of tool
+            operation: Operation to check
+        
+        Returns:
+            (allowed, reason)
+        """
+        tas = self._get_tas()
+        return tas.check_permission(self.agent_type, tool_name, operation)
+    
+    def handle_denial(
+        self,
+        tool_name: str,
+        operation: str,
+        reason: str,
+        state: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """Handle tool access denial.
+        
+        Args:
+            tool_name: Tool that was denied
+            operation: Operation that was denied
+            reason: Denial reason
+            state: Optional task state for context
+        
+        Returns:
+            Denial response with escalation options
+        """
+        logger.warning(
+            f"Tool access denied for {self.agent_id} ({self.agent_type}): "
+            f"tool={tool_name}, operation={operation}, reason={reason}"
+        )
+        
+        return {
+            "denied": True,
+            "tool_name": tool_name,
+            "operation": operation,
+            "reason": reason,
+            "escalation_available": True,  # For future gate creation
+            "message": f"Access denied: {reason}"
+        }
+    
+    async def request_permission_escalation(
+        self,
+        tool_name: str,
+        operation: str,
+        reason: str,
+        context: Optional[Dict[str, Any]] = None,
+        orchestrator: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """Request permission escalation through human gate.
+        
+        Args:
+            tool_name: Tool requiring elevated permission
+            operation: Operation requiring permission
+            reason: Why this permission is needed
+            context: Additional context for human review
+            orchestrator: Orchestrator instance for gate creation
+        
+        Returns:
+            Escalation request response with gate ID
+        """
+        logger.info(
+            f"Permission escalation requested: agent={self.agent_id}, "
+            f"tool={tool_name}, operation={operation}"
+        )
+        
+        # TODO: Integrate with gate system when available
+        # For now, return structured escalation request
+        escalation = {
+            "escalation_requested": True,
+            "agent_id": self.agent_id,
+            "agent_type": self.agent_type,
+            "tool_name": tool_name,
+            "operation": operation,
+            "reason": reason,
+            "context": context or {},
+            "status": "pending_human_approval",
+            "gate_id": None,  # Will be set when gate system integrated
+            "message": f"Escalation requested: {reason}"
+        }
+        
+        # When gate system is ready, create gate here:
+        # if orchestrator:
+        #     gate = await orchestrator.create_permission_gate(
+        #         agent_id=self.agent_id,
+        #         tool_name=tool_name,
+        #         operation=operation,
+        #         reason=reason,
+        #         context=context
+        #     )
+        #     escalation["gate_id"] = gate.id
+        #     escalation["status"] = "awaiting_approval"
+        
+        return escalation
+
+
 
 class BaseAgent(ABC):
     """Shared execution framework for all autonomous agents.
@@ -85,6 +258,9 @@ class BaseAgent(ABC):
         self.rag_service = rag_service
         self.search_service = search_service
         self.system_prompt = system_prompt
+        
+        # TAS client for direct tool access
+        self.tas_client = TASClient(agent_id=agent_id, agent_type=agent_type)
 
     async def run_task(self, task: Any) -> TaskResult:
         """Execute a task using the iterative execution loop."""

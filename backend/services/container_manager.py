@@ -180,10 +180,14 @@ class ContainerManager:
             ValueError: If language is not supported
             DockerException: If Docker operation fails
         """
+        # Auto-initialize if not done yet
+        if not self.client:
+            await self.startup()
+        
         if not self.client:
             return {
                 "success": False,
-                "message": "Docker client not initialized",
+                "message": "Docker client not initialized - Docker may not be running",
                 "container_id": None
             }
         

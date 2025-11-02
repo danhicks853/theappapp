@@ -70,6 +70,21 @@ services:
     networks:
       - theappapp-network
 
+  # SearXNG - Privacy-respecting metasearch engine for AI agents
+  searxng:
+    image: searxng/searxng:latest
+    container_name: theappapp-searxng
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config/searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-changeme}
+    networks:
+      - theappapp-network
+    restart: unless-stopped
+
 networks:
   theappapp-network:
     driver: bridge
