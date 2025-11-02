@@ -18,6 +18,7 @@ from .communication import (
     MessageRouter,
     AnyMessage,
 )
+from .user_settings import AutonomyLevel, UserSettings
 
 __all__ = [
     "MessageType",
@@ -32,4 +33,6 @@ __all__ = [
     "ErrorReportMessage",
     "MessageRouter",
     "AnyMessage",
+    "AutonomyLevel",
+    "UserSettings",
 ]

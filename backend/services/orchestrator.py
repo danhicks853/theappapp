@@ -11,6 +11,9 @@ from enum import Enum
 from queue import PriorityQueue
 from typing import Any, Awaitable, Dict, List, Optional
 
+from backend.models import AutonomyLevel
+from backend.services.autonomy_policy import should_escalate as autonomy_should_escalate
+
 
 async def _awaitable(value: Any) -> Any:
     """Await value if needed, otherwise return synchronously."""
@@ -127,6 +130,9 @@ class Orchestrator:
         tas_client: Optional[Any] = None,
         llm_client: Optional[Any] = None,
         gate_manager: Optional[Any] = None,
+        rag_service: Optional[Any] = None,
+        decision_logger: Optional[Any] = None,
+        autonomy_level: AutonomyLevel = AutonomyLevel.MEDIUM,
     ):
         """
         Initialize the Orchestrator.
@@ -157,6 +163,9 @@ class Orchestrator:
         self.tas_client = tas_client
         self.llm_client = llm_client
         self.gate_manager = gate_manager
+        self.rag_service = rag_service
+        self._decision_logger = decision_logger
+        self.autonomy_level = autonomy_level
         self.logger = logging.getLogger("orchestrator")
 
         # Initialization timestamp
@@ -514,6 +523,187 @@ class Orchestrator:
             return 0.0
 
         return max(0.0, min(1.0, score))
+
+    def should_escalate(self, *, confidence_score: float) -> bool:
+        """Determine whether to escalate based on autonomy level and confidence."""
+
+        return autonomy_should_escalate(
+            autonomy_level=self.autonomy_level,
+            confidence_score=confidence_score,
+        )
+
+    async def query_knowledge_base(
+        self,
+        *,
+        query: str,
+        agent_type: str,
+        task_type: str,
+        technology: Optional[str] = None,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve RAG knowledge relevant to a task using orchestrator mediation."""
+
+        if not self.rag_service or not hasattr(self.rag_service, "search"):
+            raise NotImplementedError("RAG service not configured for orchestrator")
+
+        patterns = await _awaitable(
+            self.rag_service.search(
+                query=query,
+                agent_type=agent_type,
+                task_type=task_type,
+                technology=technology,
+                limit=limit,
+            )
+        )
+
+        formatted: List[Dict[str, Any]] = []
+        for pattern in patterns:
+            formatted.append(
+                {
+                    "title": getattr(pattern, "title", "Historical pattern"),
+                    "problem": getattr(pattern, "problem", ""),
+                    "solution": getattr(pattern, "solution", ""),
+                    "when_to_try": getattr(pattern, "when_to_try", ""),
+                    "success_count": getattr(pattern, "success_count", 0),
+                    "similarity": getattr(pattern, "similarity", 0.0),
+                }
+            )
+
+        return formatted
+
+    async def vet_pm_decision(self, project_plan: Dict[str, Any]) -> Dict[str, Any]:
+        """Review a PM proposal with specialists and log the orchestrator decision."""
+
+        self.logger.info("Vetting PM decision for project %s", self.project_id)
+        required_specialists: List[AgentType] = []
+
+        if project_plan.get("has_security_implications"):
+            required_specialists.append(AgentType.SECURITY_EXPERT)
+        if project_plan.get("has_performance_requirements"):
+            required_specialists.append(AgentType.DEVOPS_ENGINEER)
+        if project_plan.get("requires_backend_changes"):
+            required_specialists.append(AgentType.BACKEND_DEVELOPER)
+
+        feedback: List[Dict[str, Any]] = []
+        for specialist_type in required_specialists:
+            consultation = await _awaitable(
+                self.consult_specialist(
+                    requesting_agent_id=project_plan.get("pm_agent_id", "project_manager"),
+                    specialist_type=specialist_type,
+                    question=f"Review project plan section for {specialist_type.value}",
+                    context={"project_plan": project_plan},
+                )
+            )
+            if consultation:
+                feedback.append(consultation)
+
+        approved = not feedback
+        decision_summary = {
+            "approved": approved,
+            "feedback": feedback,
+        }
+
+        await self.log_decision(
+            decision_type="pm_vetting",
+            reasoning="Specialist feedback gathered" if feedback else "No concerns identified",
+            decision=decision_summary,
+            confidence=1.0 if approved else 0.6,
+            rag_context=None,
+        )
+
+        return decision_summary
+
+    async def log_decision(
+        self,
+        *,
+        decision_type: str,
+        reasoning: str,
+        decision: Dict[str, Any],
+        confidence: float,
+        rag_context: Optional[List[Dict[str, Any]]] = None,
+        tokens: Optional[Dict[str, int]] = None,
+        execution_result: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist orchestrator decision details for analytics."""
+
+        entry = {
+            "project_id": self.project_id,
+            "decision_type": decision_type,
+            "situation": decision.get("situation"),
+            "reasoning": reasoning,
+            "decision": decision,
+            "autonomy_level": self.autonomy_level.value,
+            "rag_context": rag_context,
+            "confidence": confidence,
+            "tokens_input": (tokens or {}).get("input"),
+            "tokens_output": (tokens or {}).get("output"),
+            "execution_result": execution_result,
+        }
+
+        if not self._decision_logger:
+            self.logger.debug("Decision logging skipped; recorder not configured | %s", decision_type)
+            return
+
+        await _awaitable(self._decision_logger(entry))
+
+    def route_collaboration(
+        self,
+        help_request: Dict[str, Any],
+        *,
+        specialist_types: Optional[List[AgentType]] = None,
+    ) -> Dict[str, Any]:
+        """Select the best specialist for a collaboration request."""
+
+        specialist_types = specialist_types or [
+            AgentType.SECURITY_EXPERT,
+            AgentType.DEVOPS_ENGINEER,
+            AgentType.BACKEND_DEVELOPER,
+        ]
+
+        candidates: List[Agent] = []
+        for agent_type in specialist_types:
+            candidates.extend(self.get_agents_by_type(agent_type))
+
+        if not candidates:
+            return {
+                "selected_agent": None,
+                "reasoning": "No available specialists",
+                "help_request": help_request,
+            }
+
+        selected = sorted(
+            candidates,
+            key=lambda agent: (
+                agent.status != "idle",
+                agent.metadata.get("current_load", 0),
+            ),
+        )[0]
+
+        decision_payload = {
+            "action": "route_collaboration",
+            "details": {
+                "agent_id": selected.agent_id,
+                "agent_type": selected.agent_type.value,
+            },
+            "next_steps": ["Notify specialist", "Share context"],
+        }
+
+        asyncio.create_task(
+            self.log_decision(
+                decision_type="collaboration_routing",
+                reasoning="Selected lowest-load specialist",
+                decision=decision_payload,
+                confidence=0.8,
+                rag_context=None,
+            )
+        )
+
+        return {
+            "selected_agent": selected.agent_id,
+            "agent_type": selected.agent_type.value,
+            "reasoning": "Selected specialist based on availability",
+            "help_request": help_request,
+        }
 
     async def create_gate(
         self, reason: str, context: Dict[str, Any], agent_id: Optional[str]

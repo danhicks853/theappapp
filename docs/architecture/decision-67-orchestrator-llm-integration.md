@@ -355,7 +355,55 @@ class AutonomyConfig:
     }
 ```
 
-### **3. RAG-Mediated Context Injection**
+### **3. Configurable LLM Parameters (Temperature & Model Selection)**
+
+**Implementation**:
+- Per-agent temperature configuration (default: 0.3 for deterministic reasoning)
+- Per-agent model selection (default: gpt-4o-mini for cost efficiency)
+- Stored in database alongside autonomy level in user_settings or agent_configs table
+- Configurable via frontend settings UI (Phase 2 frontend work)
+
+**Temperature Guidelines**:
+- **Orchestrator**: 0.3 (deterministic coordination decisions)
+- **Backend/Frontend Developers**: 0.3-0.5 (predictable code generation)
+- **PM/Workshopper**: 0.5-0.7 (creative ideation and planning)
+- **QA Engineer**: 0.2 (consistent test generation)
+- **Security Expert**: 0.2 (rigorous security analysis)
+
+**Model Selection Guidelines**:
+- **Default**: gpt-4o-mini (cost-effective for most tasks)
+- **Complex Reasoning**: gpt-4o (orchestrator decisions, architecture planning)
+- **Heavy Code Generation**: gpt-4o (backend/frontend complex features)
+- **Simple Tasks**: gpt-4o-mini (documentation, simple CRUD, tests)
+
+**Rationale**:
+- Different agents require different creativity levels
+- Cost optimization by using smaller models where appropriate
+- User control over quality vs cost trade-off per agent
+- Allows experimentation to find optimal settings per project type
+
+**Storage Schema**:
+```python
+# agent_llm_configs table
+{
+    "agent_type": "orchestrator",
+    "model": "gpt-4o-mini",
+    "temperature": 0.3,
+    "user_id": "user-123",
+    "project_id": "project-456"  # optional: per-project overrides
+}
+```
+
+**Frontend Implementation** (Phase 2):
+- Settings page with agent-specific LLM configuration
+- Sliders for temperature per agent type
+- Dropdown for model selection per agent type
+- Presets: "Cost Optimized", "Quality Optimized", "Balanced"
+- API endpoints: GET/PUT `/api/v1/settings/agent-llm-config`
+
+---
+
+### **4. RAG-Mediated Context Injection**
 
 ```python
 class ContextBuilder:
@@ -400,7 +448,7 @@ class ContextBuilder:
         )
 ```
 
-### **4. PM Vetting Workflow**
+### **5. PM Vetting Workflow**
 
 ```python
 class PMVettingService:

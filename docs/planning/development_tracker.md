@@ -172,105 +172,615 @@ This document tracks all development tasks derived from our 6-phase planning. Ea
 **Dependencies**: Requires 1.2.0 (Agent Execution Loop) complete - uses orchestrator.evaluate_confidence()
 **Reference**: `docs/architecture/decision-67-orchestrator-llm-integration.md`
 
-- [ ] **TODO**: Implement OrchestratorLLMClient with full chain-of-thought reasoning
+- [x] **COMPLETED**: Implement OrchestratorLLMClient with full chain-of-thought reasoning
   - **File**: `backend/services/orchestrator_llm_client.py`
   - **Class**: `OrchestratorLLMClient` with methods: `reason_about_task()`, `select_agent()`, `evaluate_progress()`
   - **Acceptance**: Client returns structured reasoning with confidence scores, uses gpt-4o model
   - **Test**: Unit tests verify reasoning structure, integration tests validate agent selection logic
 
-- [ ] **TODO**: Create orchestrator base system prompt and templates
+- [x] **COMPLETED**: Create orchestrator base system prompt and templates
   - **File**: `backend/prompts/orchestrator_prompts.py`
   - **Content**: Base system prompt defining orchestrator role, context injection templates, decision-making guidelines
   - **Acceptance**: Prompt includes role definition, available agents list, escalation rules, output format requirements
   - **Test**: Prompt validation tests ensure all required sections present
 
-- [ ] **TODO**: Implement autonomy level configuration (low/medium/high slider)
+- [x] **COMPLETED**: Implement autonomy level configuration (low/medium/high slider)
   - **Database**: Add `autonomy_level` column to `user_settings` table (VARCHAR, values: 'low'/'medium'/'high')
   - **Backend**: `backend/models/user_settings.py` - add field and validation
   - **Acceptance**: Setting persists to database, defaults to 'medium', validates enum values
   - **Test**: CRUD tests for autonomy setting
 
-- [ ] **TODO**: Build autonomy threshold logic for escalation decisions
+- [x] **COMPLETED**: Build autonomy threshold logic for escalation decisions
   - **File**: `backend/services/orchestrator.py` - add `should_escalate()` method
   - **Logic**: Low=always escalate, Medium=escalate on uncertainty>0.3, High=escalate on uncertainty>0.7
   - **Acceptance**: Method returns boolean based on autonomy level and confidence score
   - **Test**: Unit tests for all 3 autonomy levels with various confidence scores
 
-- [ ] **TODO**: Create orchestrator-mediated RAG query system
+- [x] **COMPLETED**: Create orchestrator-mediated RAG query system
   - **File**: `backend/services/orchestrator.py` - add `query_knowledge_base()` method
   - **Integration**: Calls `RAGQueryService.search()` and formats results for agent context
   - **Acceptance**: Returns top 5 relevant patterns, includes similarity scores, formats for prompt injection
   - **Test**: Integration test with mock Qdrant, verify result formatting
 
-- [ ] **TODO**: Implement PM vetting workflow (orchestrator reviews PM decisions with specialists)
+- [x] **COMPLETED**: Implement PM vetting workflow (orchestrator reviews PM decisions with specialists)
   - **File**: `backend/services/orchestrator.py` - add `vet_pm_decision()` method
   - **Workflow**: PM proposes → Orchestrator reviews → Consults specialist if needed → Approves/rejects
   - **Acceptance**: Creates collaboration request, waits for specialist response, logs decision to database
   - **Test**: End-to-end test simulating PM decision requiring specialist input
 
-- [ ] **TODO**: Build orchestrator decision logging to database
+- [x] **COMPLETED**: Build orchestrator decision logging to database
   - **Table**: `orchestrator_decisions` (already defined in Decision 79)
   - **File**: `backend/services/orchestrator.py` - add `log_decision()` method
   - **Fields**: decision_type, reasoning, confidence, selected_agent, outcome
   - **Acceptance**: Every major decision logged with full context, queryable for analytics
   - **Test**: Verify logging on agent selection, escalation, collaboration routing
 
-- [ ] **TODO**: Create frontend autonomy slider in settings
+- [x] **COMPLETED**: Create frontend autonomy slider in settings
   - **File**: `frontend/src/pages/Settings.tsx` - add autonomy section
   - **Component**: Slider with 3 positions (Low/Medium/High), descriptions for each level
   - **API**: PUT `/api/v1/settings/autonomy` endpoint
   - **Acceptance**: Slider updates database, shows current value on load, displays help text
   - **Test**: E2E test changing autonomy level and verifying persistence
 
-- [ ] **TODO**: Implement orchestrator context layer templates
+- [x] **COMPLETED**: Implement orchestrator context layer templates
   - **File**: `backend/prompts/orchestrator_prompts.py` - add `build_context()` function
   - **Templates**: Project context, agent context, RAG results, collaboration history
   - **Acceptance**: Templates inject all relevant context into LLM prompts, max 8000 tokens
   - **Test**: Unit tests verify context assembly, token counting
 
-- [ ] **TODO**: Build orchestrator agent selection logic for collaboration routing
+- [x] **COMPLETED**: Build orchestrator agent selection logic for collaboration routing
   - **File**: `backend/services/orchestrator.py` - add `route_collaboration()` method
   - **Logic**: Analyzes help request, selects best specialist based on expertise, checks availability
   - **Acceptance**: Returns agent_id and reasoning, logs routing decision, handles no-match case
   - **Test**: Unit tests for various collaboration scenarios (security, performance, architecture)
 
+### 1.2.1 OpenAI Integration Foundation (BLOCKING - Must Complete First)
+**Priority**: P0 - BLOCKS ALL AGENT IMPLEMENTATIONS
+**Dependencies**: Requires 1.2.0 (BaseAgent) complete
+**Reference**: Foundation for all LLM operations
+
+- [ ] **TODO**: Create OpenAI adapter service with token logging hooks
+  - **File**: `backend/services/openai_adapter.py`
+  - **Class**: `OpenAIAdapter` with methods:
+    - `__init__(api_key: str, token_logger: TokenLogger | None)` - Initialize AsyncOpenAI client
+    - `async chat_completion(model: str, messages: List[dict], temperature: float, **kwargs) -> ChatCompletion` - Call chat API
+    - `async embed_text(text: str, model: str = "text-embedding-3-small") -> List[float]` - Generate embeddings
+    - `_log_tokens(response: ChatCompletion, metadata: dict)` - Hook for token logging
+  - **Wrapper**: Wraps AsyncOpenAI from `openai` package (already imported in OrchestratorLLMClient)
+  - **Error Handling**: Retry logic (3 attempts, exponential backoff), timeout handling, API error parsing
+  - **Token Logging**: Extracts `response.usage.{prompt_tokens, completion_tokens}` and calls TokenLogger
+  - **Configuration**: Loads API key from `OPENAI_API_KEY` env var or database `api_keys` table
+  - **Acceptance**: All OpenAI calls go through adapter, token logging works, errors handled gracefully
+  - **Test**: Unit tests with mock AsyncOpenAI, integration tests with real API (skipif no key)
+  - **Example Usage**:
+    ```python
+    adapter = OpenAIAdapter(api_key=os.getenv("OPENAI_API_KEY"))
+    response = await adapter.chat_completion(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "Hello"}],
+        temperature=0.7
+    )
+    ```
+
+- [ ] **TODO**: Create API keys configuration table
+  - **Migration**: `alembic/versions/004_create_api_keys_table.py`
+  - **Schema**: `api_keys` table
+    - id (UUID PRIMARY KEY)
+    - service (VARCHAR UNIQUE) - e.g., "openai", "anthropic" (for future)
+    - api_key_encrypted (TEXT NOT NULL) - Fernet encrypted
+    - is_active (BOOLEAN DEFAULT true)
+    - created_at (TIMESTAMP DEFAULT NOW())
+    - updated_at (TIMESTAMP DEFAULT NOW())
+  - **Indexes**: idx_api_keys_service (unique), idx_api_keys_active
+  - **Encryption**: Use Fernet from cryptography package, key stored in `ENCRYPTION_KEY` env var
+  - **Seed Data**: None (user must configure via UI)
+  - **Acceptance**: Table stores encrypted API keys, one key per service, supports rotation
+  - **Test**: Insert key, retrieve and decrypt, verify encryption, test uniqueness constraint
+  - **Example**:
+    ```sql
+    INSERT INTO api_keys (service, api_key_encrypted, is_active) 
+    VALUES ('openai', 'gAAAAABf...encrypted...', true);
+    ```
+
+- [ ] **TODO**: Implement API key management service
+  - **File**: `backend/services/api_key_service.py`
+  - **Class**: `APIKeyService` with methods:
+    - `get_key(service: str) -> str` - Get decrypted API key for service
+    - `set_key(service: str, api_key: str) -> bool` - Encrypt and store API key
+    - `test_key(service: str, api_key: str) -> bool` - Test key validity before storing
+    - `rotate_key(service: str, new_key: str) -> bool` - Replace existing key
+  - **Encryption**: Uses Fernet for symmetric encryption, generates cipher from ENCRYPTION_KEY env var
+  - **Caching**: Cache decrypted keys in memory for 5 minutes (security trade-off for performance)
+  - **Validation**: Test OpenAI key by calling `/v1/models` endpoint before storing
+  - **Acceptance**: Keys stored encrypted, decryption works, caching improves performance, validation prevents invalid keys
+  - **Test**: Store/retrieve keys, verify encryption, test caching, test validation
+  - **Example**:
+    ```python
+    key_service = APIKeyService()
+    await key_service.set_key("openai", "sk-proj-...")
+    api_key = await key_service.get_key("openai")  # Returns decrypted key
+    ```
+
+- [ ] **TODO**: Create API key configuration UI in settings
+  - **File**: `frontend/src/pages/Settings.tsx` - Add API Keys section
+  - **Form Fields**:
+    - Service selector (OpenAI for now, disabled other options)
+    - API key input (password field with show/hide toggle)
+    - Test connection button
+    - Save button
+  - **Workflow**: Enter key → Test (calls `/api/v1/keys/test`) → Save if valid → Show success
+  - **Security**: Never display full key after save, only show "sk-proj-...****abc" (last 3 chars)
+  - **Status Indicator**: Show "Connected" (green) or "Not Configured" (yellow) or "Invalid" (red)
+  - **Help Text**: Link to OpenAI API keys page, instructions for creating key
+  - **Acceptance**: Can configure OpenAI key, test before save, key encrypted in transit (HTTPS)
+  - **Test**: E2E test configuring key, verify test endpoint, check encryption
+  - **Backend API**: POST `/api/v1/keys` (set key), GET `/api/v1/keys/{service}/status` (check), POST `/api/v1/keys/{service}/test` (validate)
+
+- [ ] **TODO**: Build per-agent model configuration system
+  - **Migration**: `alembic/versions/005_create_agent_model_configs.py`
+  - **Schema**: `agent_model_configs` table
+    - id (UUID PRIMARY KEY)
+    - agent_type (VARCHAR NOT NULL) - "orchestrator", "backend_dev", etc.
+    - model (VARCHAR NOT NULL) - "gpt-4o-mini", "gpt-4o", "gpt-4-turbo"
+    - temperature (FLOAT DEFAULT 0.7) - 0.0 to 1.0
+    - max_tokens (INTEGER DEFAULT 4096) - Response length limit
+    - is_active (BOOLEAN DEFAULT true)
+    - updated_at (TIMESTAMP DEFAULT NOW())
+  - **Indexes**: idx_agent_model_configs_agent_type (unique)
+  - **Seed Data**: Default configs for all 10 agent types with gpt-4o-mini, temperature=0.7
+  - **Acceptance**: Each agent type has separate model config, defaults loaded on first run
+  - **Test**: Insert configs, query by agent_type, verify uniqueness
+  - **Example Seed Data**:
+    ```sql
+    INSERT INTO agent_model_configs (agent_type, model, temperature, max_tokens) VALUES
+    ('orchestrator', 'gpt-4o-mini', 0.3, 4096),
+    ('backend_dev', 'gpt-4o-mini', 0.7, 8192),
+    ('frontend_dev', 'gpt-4o-mini', 0.7, 8192);
+    ```
+
+- [ ] **TODO**: Implement AgentModelConfigService
+  - **File**: `backend/services/agent_model_config_service.py`
+  - **Class**: `AgentModelConfigService` with methods:
+    - `get_config(agent_type: str) -> AgentModelConfig` - Get config for agent
+    - `set_config(agent_type: str, model: str, temperature: float, max_tokens: int)` - Update config
+    - `get_all_configs() -> List[AgentModelConfig]` - Get all agent configs
+  - **Caching**: Cache configs in memory for 5 minutes
+  - **Defaults**: If config not found, return default (gpt-4o-mini, temp=0.7, max_tokens=4096)
+  - **Validation**: Validate model is in allowed list, temperature 0.0-1.0, max_tokens positive
+  - **Acceptance**: Configs loaded per agent, caching works, defaults applied
+  - **Test**: Get/set configs, test caching, verify defaults
+  - **Example**:
+    ```python
+    config_service = AgentModelConfigService()
+    config = await config_service.get_config("backend_dev")
+    # Returns: AgentModelConfig(model="gpt-4o-mini", temperature=0.7, max_tokens=8192)
+    ```
+
+- [ ] **TODO**: Create agent model selection UI in settings
+  - **File**: `frontend/src/pages/Settings.tsx` - Add Agent Configuration section
+  - **Layout**: Grid of agent cards (10 agents), each card shows:
+    - Agent name and icon
+    - Model selector dropdown (gpt-4o-mini, gpt-4o, gpt-4-turbo)
+    - Temperature slider (0.0 to 1.0, step 0.1)
+    - Max tokens input (1000-16000)
+    - Recommended settings hint (e.g., "Recommended: gpt-4o-mini, temp=0.7")
+  - **Presets**: "Cost Optimized" (all gpt-4o-mini), "Quality Optimized" (all gpt-4o), "Balanced" (mixed)
+  - **Save**: Batch save all configs with single API call
+  - **Acceptance**: Can configure all agents, presets work, settings save and persist
+  - **Test**: E2E test changing configs, applying presets, verify persistence
+  - **Backend API**: GET `/api/v1/agent-configs`, PUT `/api/v1/agent-configs` (bulk update)
+
+- [ ] **TODO**: Update BaseAgent to load model config
+  - **File**: `backend/agents/base_agent.py` - modify `__init__()` method
+  - **Integration**:
+    ```python
+    def __init__(self, agent_type: str):
+        self.agent_type = agent_type
+        config_service = AgentModelConfigService()
+        self.model_config = await config_service.get_config(agent_type)
+        self.openai_adapter = OpenAIAdapter()
+    ```
+  - **Usage**: When agent calls LLM, use `self.model_config.model` and `self.model_config.temperature`
+  - **Acceptance**: Agents automatically load correct model config, no hardcoded models
+  - **Test**: Initialize agent, verify config loaded, test model/temperature values
+
+### 1.1.2 Database Schema Initialization (Complete Migration Order)
+**Priority**: Must complete before dependent features
+**Purpose**: Consolidate all database migrations in correct dependency order
+
+**Migration Execution Order** (sequential, no parallel):
+```
+001 → 002 → 003 → 004 → 005 → 006 → 007 → 008 → 009 → 010 → 011-021
+```
+
+- [x] **COMPLETED**: Migration 001 - Agent execution tracking tables
+  - **File**: `backend/migrations/versions/20251101_01_create_agent_execution_tables.py`
+  - **Tables**: `agent_execution_history`, `agent_execution_steps`
+  - **Purpose**: Track agent execution loops for debugging and auditing
+  - **Status**: Already created and tested
+
+- [x] **COMPLETED**: Migration 002 - Project state tables
+  - **File**: `backend/migrations/versions/20251101_02_create_project_state_tables.py`
+  - **Tables**: `project_state`, `project_phases`, `project_tasks`
+  - **Purpose**: Persist project state for recovery and progress tracking
+  - **Status**: Already created and tested
+
+- [x] **COMPLETED**: Migration 003 - User settings and autonomy
+  - **File**: `backend/migrations/versions/20251101_03_add_autonomy_and_decision_logging.py`
+  - **Tables**: `user_settings`, `orchestrator_decisions`
+  - **Columns**: autonomy_level (low/medium/high), decision logs
+  - **Purpose**: User preferences and orchestrator decision audit trail
+  - **Status**: Already created and tested
+
+- [ ] **TODO**: Migration 004 - API keys configuration
+  - **File**: `backend/migrations/versions/20251102_04_create_api_keys_table.py`
+  - **Table**: `api_keys`
+  - **Schema**:
+    ```sql
+    CREATE TABLE api_keys (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        service VARCHAR(50) UNIQUE NOT NULL,
+        api_key_encrypted TEXT NOT NULL,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX idx_api_keys_service ON api_keys(service);
+    CREATE INDEX idx_api_keys_active ON api_keys(is_active);
+    ```
+  - **Purpose**: Store encrypted OpenAI API keys
+  - **Dependencies**: None (independent)
+  - **Test**: `pytest backend/tests/integration/test_migrations.py::test_migration_004 -v`
+
+- [ ] **TODO**: Migration 005 - Agent model configurations
+  - **File**: `backend/migrations/versions/20251102_05_create_agent_model_configs.py`
+  - **Table**: `agent_model_configs`
+  - **Schema**:
+    ```sql
+    CREATE TABLE agent_model_configs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        agent_type VARCHAR(50) UNIQUE NOT NULL,
+        model VARCHAR(50) NOT NULL DEFAULT 'gpt-4o-mini',
+        temperature FLOAT NOT NULL DEFAULT 0.7,
+        max_tokens INTEGER NOT NULL DEFAULT 4096,
+        is_active BOOLEAN DEFAULT true,
+        updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX idx_agent_model_configs_agent_type ON agent_model_configs(agent_type);
+    ```
+  - **Seed Data**:
+    ```sql
+    INSERT INTO agent_model_configs (agent_type, model, temperature, max_tokens) VALUES
+    ('orchestrator', 'gpt-4o-mini', 0.3, 4096),
+    ('backend_dev', 'gpt-4o-mini', 0.7, 8192),
+    ('frontend_dev', 'gpt-4o-mini', 0.7, 8192),
+    ('qa_engineer', 'gpt-4o-mini', 0.5, 4096),
+    ('security_expert', 'gpt-4o-mini', 0.3, 4096),
+    ('devops_engineer', 'gpt-4o-mini', 0.5, 4096),
+    ('documentation_expert', 'gpt-4o-mini', 0.7, 8192),
+    ('uiux_designer', 'gpt-4o-mini', 0.8, 8192),
+    ('github_specialist', 'gpt-4o-mini', 0.5, 4096),
+    ('workshopper', 'gpt-4o-mini', 0.7, 8192),
+    ('project_manager', 'gpt-4o-mini', 0.5, 4096);
+    ```
+  - **Purpose**: Per-agent LLM model and temperature configuration
+  - **Dependencies**: None
+  - **Test**: `pytest backend/tests/integration/test_migrations.py::test_migration_005 -v`
+
+- [ ] **TODO**: Migration 006 - Human approval gates
+  - **File**: `backend/migrations/versions/20251102_06_create_gates_table.py`
+  - **Table**: `gates`
+  - **Schema**:
+    ```sql
+    CREATE TABLE gates (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_id UUID NOT NULL,
+        agent_id VARCHAR(100) NOT NULL,
+        gate_type VARCHAR(50) NOT NULL,
+        reason TEXT NOT NULL,
+        context JSONB NOT NULL,
+        status VARCHAR(20) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW(),
+        resolved_at TIMESTAMP,
+        resolved_by VARCHAR(100),
+        feedback TEXT
+    );
+    CREATE INDEX idx_gates_project ON gates(project_id);
+    CREATE INDEX idx_gates_status ON gates(status);
+    CREATE INDEX idx_gates_agent ON gates(agent_id);
+    ```
+  - **Purpose**: Human-in-the-loop approval system
+  - **Dependencies**: None
+  - **Test**: `pytest backend/tests/integration/test_migrations.py::test_migration_006 -v`
+
+- [ ] **TODO**: Migration 007 - Agent collaboration tracking
+  - **File**: `backend/migrations/versions/20251102_07_create_collaboration_tables.py`
+  - **Tables**: `collaboration_requests`, `collaboration_outcomes`
+  - **Schema**:
+    ```sql
+    CREATE TABLE collaboration_requests (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        collaboration_id UUID NOT NULL,
+        request_type VARCHAR(50) NOT NULL,
+        requesting_agent VARCHAR(50) NOT NULL,
+        specialist_agent VARCHAR(50) NOT NULL,
+        question TEXT NOT NULL,
+        context JSONB NOT NULL,
+        urgency VARCHAR(20) DEFAULT 'medium',
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX idx_collab_requests_collab_id ON collaboration_requests(collaboration_id);
+    
+    CREATE TABLE collaboration_outcomes (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        collaboration_id UUID NOT NULL,
+        specialist_agent VARCHAR(50) NOT NULL,
+        response TEXT NOT NULL,
+        confidence FLOAT NOT NULL,
+        tokens_used INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX idx_collab_outcomes_collab_id ON collaboration_outcomes(collaboration_id);
+    ```
+  - **Purpose**: Track agent-to-agent collaboration requests
+  - **Dependencies**: None
+  - **Test**: `pytest backend/tests/integration/test_migrations.py::test_migration_007 -v`
+
+- [ ] **TODO**: Migration 008 - Prompt versioning system
+  - **File**: `backend/migrations/versions/20251102_08_create_prompts_table.py`
+  - **Table**: `prompts`
+  - **Schema**:
+    ```sql
+    CREATE TABLE prompts (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        agent_type VARCHAR(50) NOT NULL,
+        version VARCHAR(20) NOT NULL,
+        prompt_text TEXT NOT NULL,
+        is_active BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW(),
+        created_by VARCHAR(100),
+        notes TEXT,
+        UNIQUE(agent_type, version)
+    );
+    CREATE INDEX idx_prompts_agent_type ON prompts(agent_type);
+    CREATE INDEX idx_prompts_active ON prompts(agent_type, is_active);
+    ```
+  - **Seed Data**: Load default v1.0.0 prompts for all 10 agent types
+  - **Purpose**: Semantic versioning for agent prompts
+  - **Dependencies**: None
+  - **Test**: `pytest backend/tests/integration/test_migrations.py::test_migration_008 -v`
+  - **Note**: Seed prompts will be added in section 1.2.3
+
+- [ ] **TODO**: Migration 009 - LLM token usage tracking
+  - **File**: `backend/migrations/versions/20251102_09_create_llm_token_usage_table.py`
+  - **Table**: `llm_token_usage`
+  - **Schema**:
+    ```sql
+    CREATE TABLE llm_token_usage (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        timestamp TIMESTAMP NOT NULL DEFAULT NOW(),
+        project_id UUID,
+        agent_id VARCHAR(100),
+        model VARCHAR(50) NOT NULL,
+        input_tokens INTEGER NOT NULL,
+        output_tokens INTEGER NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX idx_token_usage_timestamp ON llm_token_usage(timestamp);
+    CREATE INDEX idx_token_usage_project ON llm_token_usage(project_id);
+    CREATE INDEX idx_token_usage_agent ON llm_token_usage(agent_id);
+    CREATE INDEX idx_token_usage_project_agent ON llm_token_usage(project_id, agent_id);
+    ```
+  - **Purpose**: Track token usage for cost calculation
+  - **Dependencies**: None
+  - **Retention**: Delete records older than 1 year (cleanup job)
+  - **Test**: `pytest backend/tests/integration/test_migrations.py::test_migration_009 -v`
+
+- [ ] **TODO**: Migration 010 - LLM pricing table
+  - **File**: `backend/migrations/versions/20251102_10_create_llm_pricing_table.py`
+  - **Table**: `llm_pricing`
+  - **Schema**:
+    ```sql
+    CREATE TABLE llm_pricing (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        model VARCHAR(50) UNIQUE NOT NULL,
+        input_cost_per_million DECIMAL(10, 2) NOT NULL,
+        output_cost_per_million DECIMAL(10, 2) NOT NULL,
+        effective_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        updated_at TIMESTAMP DEFAULT NOW(),
+        updated_by VARCHAR(100),
+        notes TEXT
+    );
+    ```
+  - **Seed Data**:
+    ```sql
+    INSERT INTO llm_pricing (model, input_cost_per_million, output_cost_per_million, notes) VALUES
+    ('gpt-4o-mini', 0.15, 0.60, 'OpenAI pricing as of Nov 2024'),
+    ('gpt-4o', 2.50, 10.00, 'OpenAI pricing as of Nov 2024'),
+    ('gpt-4-turbo', 10.00, 30.00, 'OpenAI pricing as of Nov 2024'),
+    ('gpt-3.5-turbo', 0.50, 1.50, 'OpenAI pricing as of Nov 2024');
+    ```
+  - **Purpose**: Manual pricing management for cost calculation
+  - **Dependencies**: None
+  - **Test**: `pytest backend/tests/integration/test_migrations.py::test_migration_010 -v`
+
+- [ ] **TODO**: Migration 011 - RAG knowledge staging
+  - **File**: `backend/migrations/versions/20251102_11_create_knowledge_staging_table.py`
+  - **Table**: `knowledge_staging`
+  - **Schema**:
+    ```sql
+    CREATE TABLE knowledge_staging (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        knowledge_type VARCHAR(50) NOT NULL,
+        content TEXT NOT NULL,
+        metadata JSONB NOT NULL,
+        embedded BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX idx_knowledge_staging_type ON knowledge_staging(knowledge_type);
+    CREATE INDEX idx_knowledge_staging_embedded ON knowledge_staging(embedded);
+    ```
+  - **Purpose**: Stage knowledge before embedding to Qdrant
+  - **Dependencies**: None
+  - **Test**: `pytest backend/tests/integration/test_migrations.py::test_migration_011 -v`
+
+- [ ] **TODO**: Migration 012-018 - Additional feature tables
+  - **Note**: Reserved for Docker containers, GitHub credentials, email settings, etc.
+  - **Will be defined as features are implemented**
+
+- [ ] **TODO**: Migration 019 - User authentication (users, sessions, invites)
+  - **File**: `backend/migrations/versions/20251102_19_create_auth_tables.py`
+  - **Tables**: `users`, `user_sessions`, `user_invites`
+  - **Schema**: See Section 4.7 (User Authentication with 2FA)
+  - **Purpose**: User management, JWT sessions, invite-only signup
+  - **Dependencies**: None (bootstrap with initial admin via script)
+  - **Test**: `pytest backend/tests/integration/test_migrations.py::test_migration_019 -v`
+
+- [ ] **TODO**: Migration 020 - Two-factor authentication
+  - **File**: `backend/migrations/versions/20251102_20_create_2fa_table.py`
+  - **Table**: `two_factor_auth`
+  - **Schema**: See Section 4.7 (User Authentication with 2FA)
+  - **Purpose**: TOTP secrets and backup codes
+  - **Dependencies**: Migration 019 (FK to users)
+  - **Test**: `pytest backend/tests/integration/test_migrations.py::test_migration_020 -v`
+
+- [ ] **TODO**: Migration 021 - Email service configuration
+  - **File**: `backend/migrations/versions/20251102_21_create_email_settings_table.py`
+  - **Table**: `email_settings`
+  - **Schema**: See Section 4.7 SMTP Email Service Integration
+  - **Purpose**: SMTP configuration for automated emails
+  - **Dependencies**: None
+  - **Test**: `pytest backend/tests/integration/test_migrations.py::test_migration_021 -v`
+
+- [ ] **TODO**: Create migration dependency validation script
+  - **File**: `backend/scripts/validate_migrations.py`
+  - **Purpose**: Verify migrations can be applied in order, all FK references valid
+  - **Checks**: Sequential ordering, table dependencies, index names unique
+  - **Usage**: `python -m backend.scripts.validate_migrations`
+  - **Acceptance**: Script passes on all migrations, catches dependency issues
+  - **Test**: Run script, verify output, test with intentionally broken migration
+
 ### 1.2 Agent System Architecture (REVISED FOR LLM INTEGRATION)
-**NOTE**: All tasks in this section BLOCKED until 1.2.0 (Agent Execution Loop) is complete.
+**Dependencies**: Requires 1.2.1 (OpenAI Integration) complete
+**NOTE**: All agents use BaseAgent from 1.2.0, load prompts from 1.2.4 versioning system
 
-- [ ] **TODO**: Create base agent class with common functionality
-  - **NOTE**: REPLACED by 1.2.0 tasks above - use BaseAgent from Decision 83
-- [ ] **TODO**: Implement Backend Developer agent 
-- [ ] **TODO**: Implement Frontend Developer agent 
-- [ ] **TODO**: Implement QA Engineer agent 
-- [ ] **TODO**: Implement Security Expert agent 
-- [ ] **TODO**: Implement DevOps Engineer agent 
-- [ ] **TODO**: Implement Documentation Expert agent 
-- [ ] **TODO**: Implement UI/UX Designer agent 
-- [ ] **TODO**: Implement GitHub Specialist agent 
-- [ ] **TODO**: Implement Workshopper agent 
-- [ ] **TODO**: Implement Project Manager agent 
+- [ ] **TODO**: Implement Backend Developer agent
+  - **File**: `backend/agents/backend_developer_agent.py`
+  - **Class**: `BackendDeveloperAgent(BaseAgent)`
+  - **Agent Type**: "backend_dev"
+  - **Methods to Override**:
+    - `_plan_next_step(state: TaskState) -> Step` - Plan next code/test/debug step using LLM
+    - `_execute_step(step: Step) -> Result` - Execute via TAS (write_file, run_tests, etc.)
+    - `_validate_step(step: Step, result: Result) -> ValidationResult` - Check tests pass, code quality
+  - **Tools Required**: write_file, read_file, run_command, search_files, run_tests
+  - **Prompt Loading**: Loads from prompts table WHERE agent_type='backend_dev' AND is_active=true
+  - **Example Workflow**: Given "Implement user login API" → Plan endpoint → Write code → Write tests → Run tests → Iterate
+  - **Acceptance**: Executes backend tasks, uses correct tools, follows TDD approach
+  - **Test**: 
+    - **Unit**: `backend/tests/unit/test_backend_developer_agent.py` - Test planning/validation
+    - **Integration**: `backend/tests/integration/test_backend_developer_full_task.py` - Complete API implementation
 
-### 1.2.1 LLM Agent Architecture (FINAL - Based on Decisions)
-- [ ] **TODO**: Implement OpenAI-only LLM integration with per-agent model selection
-- [ ] **TODO**: Create token usage logging system for database storage
-- [ ] **TODO**: Build agent-specific chain-of-thought prompt templates
-- [ ] **TODO**: Implement LLM input/output validation and sanitization
-- [ ] **TODO**: Create AI-assisted testing framework for LLM components
-- [ ] **TODO**: Build prompt versioning and management system
-- [ ] **TODO**: Implement RAG integration for agent learning
-- [ ] **TODO**: Create LLM error handling and retry logic
+- [ ] **TODO**: Implement Frontend Developer agent
+  - **File**: `backend/agents/frontend_developer_agent.py`
+  - **Class**: `FrontendDeveloperAgent(BaseAgent)`
+  - **Agent Type**: "frontend_dev"
+  - **Methods to Override**: Same pattern as Backend Dev
+  - **Tools Required**: write_file, read_file, run_command (npm), search_files, run_tests (vitest)
+  - **Prompt Loading**: WHERE agent_type='frontend_dev'
+  - **Example Workflow**: Given "Create login form component" → Design component → Write JSX/TSX → Write tests → Run tests → Iterate
+  - **Acceptance**: Builds React components, follows UI/UX best practices, writes component tests
+  - **Test**: 
+    - **Unit**: `backend/tests/unit/test_frontend_developer_agent.py`
+    - **Integration**: `backend/tests/integration/test_frontend_developer_full_task.py`
 
-### 1.2.2 Agent Refactoring for LLM Integration (FINAL)
-- [ ] **TODO**: Refactor Backend Developer agent with OpenAI integration and chain-of-thought (reference implementation)
-- [ ] **TODO**: Refactor Frontend Developer agent with OpenAI integration and chain-of-thought
-- [ ] **TODO**: Refactor QA Engineer agent with OpenAI integration and chain-of-thought
-- [ ] **TODO**: Refactor Security Expert agent with OpenAI integration and chain-of-thought
-- [ ] **TODO**: Refactor DevOps Engineer agent with OpenAI integration and chain-of-thought
-- [ ] **TODO**: Refactor Documentation Expert agent with OpenAI integration and chain-of-thought
-- [ ] **TODO**: Refactor UI/UX Designer agent with OpenAI integration and chain-of-thought
-- [ ] **TODO**: Refactor GitHub Specialist agent with OpenAI integration and chain-of-thought
-- [ ] **TODO**: Refactor Workshopper agent with OpenAI integration and chain-of-thought
-- [ ] **TODO**: Refactor Project Manager agent with OpenAI integration and chain-of-thought
+- [ ] **TODO**: Implement QA Engineer agent
+  - **File**: `backend/agents/qa_engineer_agent.py`
+  - **Class**: `QAEngineerAgent(BaseAgent)`
+  - **Agent Type**: "qa_engineer"
+  - **Tools Required**: read_file, run_command (pytest, vitest), write_file (test files), analyze_coverage
+  - **Example Workflow**: Given "Test user authentication" → Review code → Write test cases → Execute tests → Report results
+  - **Acceptance**: Writes comprehensive tests, achieves >90% coverage, finds edge cases
+  - **Test**:
+    - **Unit**: `backend/tests/unit/test_qa_engineer_agent.py`
+    - **Integration**: `backend/tests/integration/test_qa_engineer_full_task.py`
+
+- [ ] **TODO**: Implement Security Expert agent
+  - **File**: `backend/agents/security_expert_agent.py`
+  - **Class**: `SecurityExpertAgent(BaseAgent)`
+  - **Agent Type**: "security_expert"
+  - **Tools Required**: read_file, search_files, run_security_scan, analyze_dependencies
+  - **Example Workflow**: Given "Review authentication code" → Scan for vulnerabilities → Check OWASP Top 10 → Provide recommendations
+  - **Acceptance**: Identifies security issues, provides remediation steps, follows OWASP guidelines
+  - **Test**:
+    - **Unit**: `backend/tests/unit/test_security_expert_agent.py`
+    - **Integration**: `backend/tests/integration/test_security_expert_full_task.py`
+
+- [ ] **TODO**: Implement DevOps Engineer agent
+  - **File**: `backend/agents/devops_engineer_agent.py`
+  - **Class**: `DevOpsEngineerAgent(BaseAgent)`
+  - **Agent Type**: "devops_engineer"
+  - **Tools Required**: write_file (Dockerfile, docker-compose, CI/CD), run_command (docker), manage_containers
+  - **Example Workflow**: Given "Containerize application" → Write Dockerfile → Create docker-compose → Test build → Document
+  - **Acceptance**: Creates working Docker configs, follows 12-factor app principles
+  - **Test**:
+    - **Unit**: `backend/tests/unit/test_devops_engineer_agent.py`
+    - **Integration**: `backend/tests/integration/test_devops_engineer_full_task.py`
+
+- [ ] **TODO**: Implement Documentation Expert agent
+  - **File**: `backend/agents/documentation_expert_agent.py`
+  - **Class**: `DocumentationExpertAgent(BaseAgent)`
+  - **Agent Type**: "documentation_expert"
+  - **Tools Required**: read_file, write_file, search_files, analyze_code_structure
+  - **Example Workflow**: Given "Document API endpoints" → Analyze code → Generate API docs → Write README → Create examples
+  - **Acceptance**: Produces clear, comprehensive documentation with examples
+  - **Test**:
+    - **Unit**: `backend/tests/unit/test_documentation_expert_agent.py`
+    - **Integration**: `backend/tests/integration/test_documentation_expert_full_task.py`
+
+- [ ] **TODO**: Implement UI/UX Designer agent
+  - **File**: `backend/agents/uiux_designer_agent.py`
+  - **Class**: `UIUXDesignerAgent(BaseAgent)`
+  - **Agent Type**: "uiux_designer"
+  - **Tools Required**: read_file, write_file (design docs), generate_mockups, analyze_user_flow
+  - **Example Workflow**: Given "Design dashboard layout" → Analyze requirements → Create wireframes → Define component structure → Document design system
+  - **Acceptance**: Produces usable design specs, follows accessibility guidelines
+  - **Test**:
+    - **Unit**: `backend/tests/unit/test_uiux_designer_agent.py`
+    - **Integration**: `backend/tests/integration/test_uiux_designer_full_task.py`
+
+- [ ] **TODO**: Implement GitHub Specialist agent
+  - **File**: `backend/agents/github_specialist_agent.py`
+  - **Class**: `GitHubSpecialistAgent(BaseAgent)`
+  - **Agent Type**: "github_specialist"
+  - **Reference**: Decision 77 - GitHub Specialist Agent
+  - **Tools Required**: git_operations, create_pr, manage_issues, review_code
+  - **Example Workflow**: Given "Create PR for feature" → Review changes → Generate commit messages → Create PR → Link issues
+  - **Acceptance**: Creates proper PRs, writes semantic commits, follows Git workflow
+  - **Test**:
+    - **Unit**: `backend/tests/unit/test_github_specialist_agent.py`
+    - **Integration**: `backend/tests/integration/test_github_specialist_full_task.py`
+
+- [ ] **TODO**: Implement Workshopper agent
+  - **File**: `backend/agents/workshopper_agent.py`
+  - **Class**: `WorkshopperAgent(BaseAgent)`
+  - **Agent Type**: "workshopper"
+  - **Tools Required**: read_file, write_file, analyze_requirements, create_tasks
+  - **Example Workflow**: Given "Plan new feature" → Interview user → Analyze requirements → Create design decisions → Generate task breakdown
+  - **Acceptance**: Produces comprehensive plans with detailed tasks, follows decision-making process
+  - **Test**:
+    - **Unit**: `backend/tests/unit/test_workshopper_agent.py`
+    - **Integration**: `backend/tests/integration/test_workshopper_full_task.py`
+
+- [ ] **TODO**: Implement Project Manager agent
+  - **File**: `backend/agents/project_manager_agent.py`
+  - **Class**: `ProjectManagerAgent(BaseAgent)`
+  - **Agent Type**: "project_manager"
+  - **Tools Required**: read_project_state, update_tasks, manage_timeline, coordinate_agents
+  - **Example Workflow**: Given "Coordinate feature development" → Assess progress → Assign tasks → Monitor blockers → Report status
+  - **Acceptance**: Manages project lifecycle, coordinates agents effectively, tracks progress
+  - **Test**:
+    - **Unit**: `backend/tests/unit/test_project_manager_agent.py`
+    - **Integration**: `backend/tests/integration/test_project_manager_full_task.py`
 
 ### 1.2.3 Prompt Engineering and System Design (FINAL)
 
@@ -280,6 +790,86 @@ This document tracks all development tasks derived from our 6-phase planning. Ea
   - **Agents**: All 10 agent types (orchestrator, backend_dev, frontend_dev, qa, devops, security, pm, data_analyst, tech_writer, github_specialist)
   - **Acceptance**: Each agent has complete base prompt, role clearly defined, constraints explicit
   - **Test**: Load all prompts, verify structure, test with LLM
+  - **Example Prompt (backend_dev.txt)**:
+    ```
+    # ROLE
+    You are a Backend Developer AI agent specializing in Python, FastAPI, and PostgreSQL development. 
+    Your role is to implement backend services, APIs, and database operations with a test-driven approach.
+
+    # CAPABILITIES
+    - Write clean, maintainable Python code following PEP 8 standards
+    - Implement RESTful APIs using FastAPI with proper validation
+    - Design and implement PostgreSQL database schemas with Alembic migrations
+    - Write comprehensive unit and integration tests using pytest
+    - Debug code issues and implement fixes
+    - Review and refactor existing code for quality improvements
+
+    # CONSTRAINTS
+    - ALWAYS write tests BEFORE implementing features (TDD)
+    - NEVER hardcode credentials or sensitive data
+    - ALWAYS use type hints in Python code
+    - MUST achieve minimum 90% code coverage
+    - MUST follow repository code style and patterns
+    - CANNOT access tools outside your permission set
+    - MUST escalate to orchestrator if uncertain or blocked
+
+    # TOOLS AVAILABLE
+    - write_file: Create or modify code files
+    - read_file: Read existing code
+    - run_command: Execute pytest, linters, formatters
+    - search_files: Find code patterns
+    - run_tests: Execute test suite
+
+    # OUTPUT FORMAT
+    All responses must be valid JSON with this structure:
+    {
+      "reasoning": "Step-by-step thought process",
+      "action": "tool_name",
+      "parameters": {...},
+      "confidence": 0.0-1.0
+    }
+
+    # EXAMPLE WORKFLOW
+    Task: "Implement user login endpoint"
+    1. Analyze requirements → Identify needs (endpoint, validation, auth)
+    2. Write test first → test_user_login_success(), test_invalid_credentials()
+    3. Implement endpoint → POST /api/v1/auth/login with validation
+    4. Run tests → Verify all pass
+    5. Refactor if needed → Clean up code, add error handling
+
+    # QUALITY STANDARDS
+    - Code must pass: mypy (type checking), black (formatting), ruff (linting)
+    - Tests must cover: happy path, error cases, edge cases, input validation
+    - Documentation: Docstrings for all public functions/classes
+    - Error handling: Proper exception handling with meaningful messages
+    ```
+  - **Example Prompt (orchestrator.txt)**:
+    ```
+    # ROLE
+    You are the Orchestrator AI - the central coordinator for all agent activities.
+    You assign tasks, route messages, evaluate progress, and escalate to humans when needed.
+
+    # CAPABILITIES
+    - Analyze tasks and select appropriate agents
+    - Coordinate collaboration between agents
+    - Evaluate agent confidence and progress
+    - Decide when to escalate to human review
+    - Query knowledge base for relevant patterns
+    - Make strategic decisions about project direction
+
+    # DECISION-MAKING
+    - Consider: Task complexity, agent expertise, project phase, autonomy level
+    - Escalate when: Confidence < threshold, security concerns, conflicting approaches
+    - Collaborate when: Agent requests help, multiple perspectives needed
+
+    # OUTPUT FORMAT
+    {
+      "reasoning": "Analysis of situation and options",
+      "decision": {"action": "...", "agent": "...", "parameters": {...}},
+      "confidence": 0.0-1.0,
+      "escalation_needed": bool
+    }
+    ```
 
 - [ ] **TODO**: Create chain-of-thought reasoning templates for all agents
   - **File**: `backend/prompts/reasoning_templates.yaml`
@@ -1312,108 +1902,1726 @@ This document tracks all development tasks derived from our 6-phase planning. Ea
 ## Phase 3: Development Workflow Implementation
 
 ### 3.1 Phase Management System
+
 - [ ] **TODO**: Create 6-phase workflow engine with LLM agent coordination
+  - **File**: `backend/services/phase_manager.py`
+  - **Class**: `PhaseManager` with methods:
+    - `start_phase(project_id, phase_name) -> Phase` - Initialize phase with agents
+    - `get_current_phase(project_id) -> Phase` - Get active phase
+    - `complete_phase(project_id, phase_name) -> bool` - Validate and complete phase
+    - `transition_phase(project_id, from_phase, to_phase) -> bool` - Handle phase transitions
+  - **Phases**: Workshopping, Implementation, Testing, Deployment, Monitoring, Maintenance
+  - **Agent Assignment**: Each phase has designated agents (PM coordinates all)
+  - **Acceptance**: Phases execute in order, cannot skip, all deliverables required
+  - **Test**: 
+    - **Unit**: `backend/tests/unit/test_phase_manager.py`
+    - **Integration**: `backend/tests/integration/test_full_phase_lifecycle.py`
+
 - [ ] **TODO**: Implement phase deliverable tracking with AI validation
-- [ ] **TODO**: Build phase completion validation (checklist + 100% tests + human approval - existing)
+  - **File**: `backend/services/deliverable_tracker.py`
+  - **Class**: `DeliverableTracker` with methods:
+    - `define_deliverables(phase_name) -> List[Deliverable]` - Get required deliverables per phase
+    - `validate_deliverable(deliverable_id, artifact) -> ValidationResult` - Check quality
+    - `get_phase_completeness(phase_name) -> float` - Calculate % complete (0.0-1.0)
+  - **Deliverables by Phase**:
+    - Workshopping: Design docs, task breakdown, architecture decisions
+    - Implementation: Code files, unit tests, integration tests
+    - Testing: Test coverage >90%, all tests passing, E2E tests
+    - Deployment: Dockerfile, CI/CD config, deployment docs
+  - **AI Validation**: LLM reviews artifact quality, completeness, adherence to requirements
+  - **Acceptance**: Tracks all deliverables, validates with AI, blocks phase completion if missing
+  - **Test**: Unit tests for validation logic, integration tests with real artifacts
+
+- [ ] **TODO**: Build phase completion validation (checklist + 100% tests + human approval)
+  - **File**: `backend/services/phase_validator.py`
+  - **Class**: `PhaseValidator` with method `can_complete_phase(phase_id) -> ValidationResult`
+  - **Validation Criteria**:
+    1. All deliverables present and validated
+    2. All tests passing (pytest + frontend tests)
+    3. Code coverage ≥ 90%
+    4. No blocking issues or gates
+    5. Human approval received (if required by autonomy level)
+  - **Human Approval**: Creates gate if autonomy level requires review
+  - **Acceptance**: Phase cannot complete without all criteria met
+  - **Test**: Test each validation criterion, test approval flow
+
 - [ ] **TODO**: Design phase transition system with LLM agent handoffs
+  - **File**: `backend/services/phase_transition_service.py`
+  - **Class**: `PhaseTransitionService` with method `transition(from_phase, to_phase, project_id)`
+  - **Transition Logic**:
+    1. Validate current phase complete
+    2. Archive current phase artifacts
+    3. Notify agents of phase change
+    4. Assign new agents for next phase
+    5. Generate transition report (what was done, what's next)
+    6. Update project state
+  - **Agent Handoff**: PM agent briefs new phase agents on project context
+  - **Acceptance**: Smooth transitions, no data loss, agents properly briefed
+  - **Test**: Test all 5 phase transitions, test rollback on failure
+
 - [ ] **TODO**: Add LLM-generated progress reports and status updates
+  - **File**: `backend/services/progress_reporter.py`
+  - **Class**: `ProgressReporter` with methods:
+    - `generate_daily_report(project_id) -> Report` - Daily progress summary
+    - `generate_phase_summary(phase_id) -> Summary` - Phase completion summary
+    - `generate_blockers_report(project_id) -> Report` - Current issues
+  - **Report Contents**: Completed tasks, test coverage, blockers, next steps, timeline
+  - **LLM Generation**: Uses orchestrator LLM to analyze progress and generate natural language report
+  - **Delivery**: Store in database, email to user (if SMTP enabled), show in UI
+  - **Acceptance**: Reports accurate, actionable, generated automatically
+  - **Test**: Generate reports, verify content accuracy, test scheduling
+
 - [ ] **TODO**: Create AI-assisted phase planning and milestone generation
+  - **File**: `backend/services/milestone_generator.py`
+  - **Class**: `MilestoneGenerator` with method `generate_milestones(project_description) -> List[Milestone]`
+  - **Planning Process**:
+    1. Analyze project description with LLM
+    2. Break into 6 phases
+    3. Generate milestones per phase (3-5 milestones each)
+    4. Estimate timeline based on complexity
+    5. Define deliverables per milestone
+  - **Example Output**:
+    ```json
+    {
+      "phase": "Implementation",
+      "milestones": [
+        {"name": "Backend API Complete", "tasks": 12, "estimate": "5 days"},
+        {"name": "Frontend Components", "tasks": 8, "estimate": "3 days"}
+      ]
+    }
+    ```
+  - **Acceptance**: Generates reasonable milestones, estimates within 50% of actual
+  - **Test**: Test with various project types, validate output structure
 
 ### 3.2 Testing Framework Integration
-- [ ] **TODO**: Set up testing frameworks (pytest, Jest, Playwright, etc.)
-- [ ] **TODO**: Implement "test reality" philosophy (minimal mocking - existing)
-- [ ] **TODO**: Create staged testing pipeline with early failure detection (existing 7-stage)
-- [ ] **TODO**: Build 100% coverage enforcement system (existing)
-- [ ] **TODO**: Add LLM-powered test generation and optimization (AI-assisted testing)
+
+- [ ] **TODO**: Set up testing frameworks (pytest, Jest, Playwright)
+  - **Backend**: pytest with pytest-cov, pytest-asyncio, pytest-mock
+  - **Frontend**: Vitest for unit/component tests, Playwright for E2E
+  - **Configuration Files**:
+    - `pytest.ini` - pytest config (already exists)
+    - `vitest.config.ts` - Vitest configuration
+    - `playwright.config.ts` - E2E test configuration
+  - **Script**: `backend/scripts/setup_testing.py` - Install and configure all test frameworks
+  - **Acceptance**: All frameworks installed, configs in place, sample test runs successfully
+  - **Test**: Run `pytest --version`, `vitest --version`, `playwright test --help`
+
+- [ ] **TODO**: Implement "test reality" philosophy (minimal mocking)
+  - **Documentation**: `docs/testing/test_reality_guide.md`
+  - **Principles**:
+    - Use real database (PostgreSQL) in tests, not mocks
+    - Use real OpenAI calls in LLM tests (with skip if no API key)
+    - Use real file system operations, not mocks
+    - Mock only external services (GitHub API, SMTP in CI)
+  - **Infrastructure**: Docker Compose for test database, Qdrant test instance
+  - **Acceptance**: Tests use real components, mocks only for external services
+  - **Example**:
+    ```python
+    # ❌ BAD: Mock database
+    @patch('database.query')
+    def test_get_user(mock_query):
+        mock_query.return_value = {"id": 1}
+    
+    # ✅ GOOD: Real database
+    def test_get_user(test_db):
+        user = create_user(test_db, email="test@example.com")
+        result = get_user(test_db, user.id)
+        assert result.email == "test@example.com"
+    ```
+
+- [ ] **TODO**: Create staged testing pipeline with early failure detection
+  - **File**: `backend/scripts/run_tests_staged.py`
+  - **7-Stage Pipeline**:
+    1. Linting (ruff, mypy) - fails fast
+    2. Unit tests (isolated) - fails fast
+    3. Integration tests (database, services)
+    4. API tests (FastAPI endpoints)
+    5. LLM tests (Stage 1: rubric validation)
+    6. E2E tests (Playwright)
+    7. LLM tests (Stage 2: AI panel - expensive, runs last)
+  - **Early Failure**: Stop on first failure, don't waste time
+  - **CI Integration**: GitHub Actions runs this pipeline
+  - **Acceptance**: Stages run in order, fail fast, clear error messages
+  - **Test**: Run pipeline with intentional failures at each stage
+
+- [ ] **TODO**: Build 100% coverage enforcement system
+  - **File**: `.github/workflows/ci.yml` - CI pipeline with coverage check
+  - **Enforcement**: pytest --cov --cov-fail-under=90 (90% minimum)
+  - **Reporting**: Coverage report artifact in CI, displayed in PR
+  - **Exceptions**: Only allow <90% with explicit comment explaining why
+  - **Acceptance**: CI fails if coverage < 90%, developers notified
+  - **Test**: Test with <90% coverage, verify CI fails
+
+- [ ] **TODO**: Add LLM-powered test generation and optimization
+  - **File**: `backend/services/test_generator.py`
+  - **Class**: `TestGenerator` with methods:
+    - `generate_unit_tests(code_file) -> str` - Generate pytest tests for code
+    - `identify_missing_coverage(coverage_report) -> List[str]` - Find uncovered lines
+    - `generate_edge_cases(function_signature) -> List[TestCase]` - Suggest edge cases
+  - **LLM Integration**: Analyzes code, generates test cases with assertions
+  - **Acceptance**: Generated tests are valid, runnable, find bugs
+  - **Test**: Generate tests for sample code, verify they run and pass
+
 - [ ] **TODO**: Implement AI-assisted test case design and edge case identification
+  - **File**: `backend/services/edge_case_finder.py`
+  - **Class**: `EdgeCaseFinder` with method `find_edge_cases(function_def) -> List[EdgeCase]`
+  - **Analysis**: LLM analyzes function signature, types, logic to identify edge cases
+  - **Edge Cases**: Null inputs, boundary values, empty lists, max/min integers, unicode, concurrent access
+  - **Output**: List of test scenarios with expected behavior
+  - **Acceptance**: Finds non-obvious edge cases, improves test coverage
+  - **Test**: Test with various functions, verify edge case quality
+
 - [ ] **TODO**: Create automated test maintenance with AI updates
+  - **File**: `backend/services/test_maintainer.py`
+  - **Purpose**: Update tests when code changes
+  - **Process**:
+    1. Detect code changes in PR/commit
+    2. Analyze impact on existing tests
+    3. Suggest test updates with LLM
+    4. Generate PR comment with suggested changes
+  - **Example**: Function signature changes → Update test mocks and assertions
+  - **Acceptance**: Suggests accurate test updates, reduces test maintenance burden
+  - **Test**: Change code, verify test update suggestions
 
 ### 3.3 Quality Assurance System
-- [ ] **TODO**: Implement test quality scoring with AI analysis (AI-assisted testing)
+
+- [ ] **TODO**: Implement test quality scoring with AI analysis
+  - **File**: `backend/services/test_quality_scorer.py`
+  - **Class**: `TestQualityScorer` with method `score_test(test_code) -> Score`
+  - **Scoring Criteria** (0-100):
+    - Coverage: Does it test all code paths? (30 points)
+    - Assertions: Meaningful assertions vs. just "runs without error"? (25 points)
+    - Edge cases: Tests boundary conditions? (20 points)
+    - Clarity: Clear test names and structure? (15 points)
+    - Independence: No dependencies on other tests? (10 points)
+  - **LLM Analysis**: Evaluates test quality, provides improvement suggestions
+  - **Acceptance**: Scores correlate with actual test effectiveness
+  - **Test**: Score known good/bad tests, verify accuracy
+
 - [ ] **TODO**: Create continuous learning from test failures using LLM analysis
-- [ ] **TODO**: Build security testing integration with AI vulnerability detection (existing + AI)
+  - **File**: `backend/services/failure_learner.py`
+  - **Purpose**: Learn patterns from test failures to prevent future issues
+  - **Process**:
+    1. Capture test failure (error message, stack trace, code context)
+    2. Analyze with LLM to identify root cause pattern
+    3. Store pattern in RAG knowledge base
+    4. Use pattern for future test generation
+  - **Knowledge Base**: Stores "common failure patterns" as embeddings
+  - **Acceptance**: Similar failures detected earlier over time
+  - **Test**: Introduce known failure patterns, verify learning
+
+- [ ] **TODO**: Build security testing integration with AI vulnerability detection
+  - **File**: `backend/services/security_test_runner.py`
+  - **Tools**: bandit (Python), npm audit (Node), OWASP ZAP
+  - **AI Enhancement**: LLM analyzes code for security patterns (SQL injection, XSS, etc.)
+  - **Checks**:
+    - Dependency vulnerabilities (CVE scanning)
+    - Code vulnerabilities (static analysis)
+    - Runtime vulnerabilities (DAST with ZAP)
+    - AI-detected patterns (hardcoded secrets, weak crypto)
+  - **Acceptance**: Finds known vulnerabilities, generates security test cases
+  - **Test**: Test with intentionally vulnerable code
+
 - [ ] **TODO**: Design performance testing framework with AI optimization
+  - **File**: `backend/services/performance_tester.py`
+  - **Metrics**: Response time, throughput, memory usage, database query count
+  - **Benchmarks**: Define performance targets per endpoint
+  - **AI Optimization**: LLM analyzes slow queries/endpoints and suggests improvements
+  - **Tools**: locust for load testing, pytest-benchmark for micro-benchmarks
+  - **Acceptance**: Detects performance regressions, suggests optimizations
+  - **Test**: Run load tests, verify metrics collected
+
 - [ ] **TODO**: Add LLM-powered code review and quality assessment
+  - **File**: `backend/services/code_reviewer.py`
+  - **Class**: `CodeReviewer` with method `review_code(code_diff) -> ReviewResult`
+  - **Review Aspects**: Code style, potential bugs, security issues, performance, maintainability
+  - **Output**: List of issues with severity (critical/major/minor), suggested fixes
+  - **Integration**: Runs on PR creation, posts review as PR comment
+  - **Acceptance**: Finds real issues, minimal false positives, actionable feedback
+  - **Test**: Review known good/bad code, verify accuracy
+
 - [ ] **TODO**: Create AI-driven quality metrics and improvement recommendations
+  - **File**: `backend/services/quality_metrics_analyzer.py`
+  - **Metrics**: Code coverage, test quality scores, security scan results, performance benchmarks
+  - **Dashboard**: Aggregate metrics over time, show trends
+  - **AI Recommendations**: Analyze metrics and suggest improvements ("Focus on testing module X", "Optimize query Y")
+  - **Acceptance**: Recommendations are actionable and improve quality
+  - **Test**: Generate metrics, verify recommendations
 
 ### 3.4 Debugging & Failure Resolution
+
 - [ ] **TODO**: Create structured debugging process with LLM assistance
-- [ ] **TODO**: Implement agent collaboration for problem solving (existing)
-- [ ] **TODO**: Build escalation paths for specialist help (existing)
-- [ ] **TODO**: Design progress recognition vs. identical failure detection (existing 3-cycle gate)
+  - **File**: `backend/services/debug_assistant.py`
+  - **Class**: `DebugAssistant` with method `analyze_failure(error, context) -> DebugPlan`
+  - **Process**:
+    1. Capture: Error message, stack trace, code context, recent changes
+    2. Analyze: LLM identifies likely root cause
+    3. Plan: Generate debugging steps (add logging, reproduce, test fix)
+    4. Execute: Agent follows debug plan
+    5. Verify: Confirm fix resolves issue
+  - **Example Output**:
+    ```json
+    {
+      "likely_cause": "Database connection timeout",
+      "debug_steps": [
+        "Check database connection pool settings",
+        "Add logging to connection attempts",
+        "Test with increased timeout"
+      ],
+      "confidence": 0.8
+    }
+    ```
+  - **Acceptance**: Debugging plans are helpful, reduce time to resolution
+  - **Test**: Test with various failure types
+
+- [ ] **TODO**: Implement agent collaboration for problem solving
+  - **Note**: Already covered in Section 1.3.1 (Agent Collaboration Protocol)
+  - **Reference**: Decision 70 - Agent Collaboration Protocol
+  - **No additional work needed**
+
+- [ ] **TODO**: Build escalation paths for specialist help
+  - **Note**: Already covered in Section 1.3 (Decision-Making & Escalation System)
+  - **Reference**: Uses CollaborationOrchestrator to route to specialists
+  - **No additional work needed**
+
+- [ ] **TODO**: Design progress recognition vs. identical failure detection
+  - **Note**: Already implemented in Section 1.2.0 and 1.4.1
+  - **Reference**: LoopDetector (3 identical failures triggers gate)
+  - **No additional work needed**
+
 - [ ] **TODO**: Add AI-powered root cause analysis and failure prediction
+  - **File**: `backend/services/root_cause_analyzer.py`
+  - **Class**: `RootCauseAnalyzer` with methods:
+    - `analyze_failure(failure_data) -> RootCause` - Identify root cause
+    - `predict_failures(project_metrics) -> List[PredictedFailure]` - Predict issues
+  - **Root Cause Analysis**: Analyzes error, code changes, dependencies, system state
+  - **Failure Prediction**: Uses project metrics (test failures, code churn, complexity) to predict likely failures
+  - **Acceptance**: Root cause analysis accurate >70%, predictions useful
+  - **Test**: Test with historical failures, verify accuracy
+
 - [ ] **TODO**: Create LLM-generated debugging strategies and solutions
+  - **File**: `backend/services/solution_generator.py`
+  - **Class**: `SolutionGenerator` with method `generate_solutions(problem) -> List[Solution]`
+  - **Process**:
+    1. Analyze problem with LLM
+    2. Query knowledge base for similar issues
+    3. Generate multiple solution approaches
+    4. Rank by confidence and complexity
+  - **Output**: Ranked list of solutions with implementation steps
+  - **Acceptance**: Solutions are valid, at least one works >80% of time
+  - **Test**: Test with known problems, verify solution quality
 
 ---
 
 ## Phase 4: Frontend & Monitoring Implementation
 
 ### 4.1 Frontend Architecture
+
 - [ ] **TODO**: Set up React + TypeScript project structure
+  - **Directory**: `frontend/` (new React app)
+  - **Tool**: Create React App with TypeScript template OR Vite + React + TypeScript
+  - **Structure**:
+    ```
+    frontend/
+    ├── src/
+    │   ├── components/     # Reusable UI components
+    │   ├── pages/          # Page components (Dashboard, Settings, etc.)
+    │   ├── hooks/          # Custom React hooks
+    │   ├── store/          # Zustand state management
+    │   ├── services/       # API client services
+    │   ├── types/          # TypeScript type definitions
+    │   ├── utils/          # Utility functions
+    │   ├── App.tsx         # Root component
+    │   └── main.tsx        # Entry point
+    ├── public/             # Static assets
+    ├── tests/              # Test files
+    ├── package.json
+    ├── tsconfig.json       # TypeScript config
+    └── vite.config.ts      # Vite config (if using Vite)
+    ```
+  - **Dependencies**: react, react-dom, typescript, react-router-dom
+  - **Dev Dependencies**: @types/react, @types/react-dom, vite, vitest
+  - **Acceptance**: Clean project structure, TypeScript compiles, dev server runs
+  - **Test**: Run `npm run dev`, verify app loads in browser
+
 - [ ] **TODO**: Implement Tailwind CSS + Headless UI + Lucide React
+  - **Tailwind CSS**: Utility-first CSS framework
+  - **Installation**: `npm install -D tailwindcss postcss autoprefixer`
+  - **Config**: `tailwind.config.js` with dark mode, custom colors
+  - **Theme**: Dark blue dark mode as primary theme
+  - **Headless UI**: Unstyled, accessible UI components
+  - **Installation**: `npm install @headlessui/react`
+  - **Components**: Dialog, Menu, Listbox, Disclosure, Tab, Transition
+  - **Lucide React**: Icon library (modern, lightweight)
+  - **Installation**: `npm install lucide-react`
+  - **Icons**: Use for all UI icons (menu, settings, status, etc.)
+  - **Acceptance**: Tailwind classes work, Headless UI components render, icons display
+  - **Test**: Create sample component with Tailwind + Headless UI + Lucide icon
+  - **Example**:
+    ```tsx
+    import { Menu } from '@headlessui/react'
+    import { Settings } from 'lucide-react'
+    
+    export function SettingsMenu() {
+      return (
+        <Menu as="div" className="relative">
+          <Menu.Button className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-700">
+            <Settings className="w-5 h-5" />
+            <span>Settings</span>
+          </Menu.Button>
+          <Menu.Items className="absolute right-0 mt-2 w-48 bg-slate-800 rounded-lg shadow-lg">
+            {/* Menu items */}
+          </Menu.Items>
+        </Menu>
+      )
+    }
+    ```
+
 - [ ] **TODO**: Create Zustand state management setup
+  - **Library**: Zustand (lightweight state management)
+  - **Installation**: `npm install zustand`
+  - **Stores to Create**:
+    - `useProjectStore` - Current project, project list, filters
+    - `useAgentStore` - Agent statuses, current activity
+    - `useSettingsStore` - User settings, autonomy level, preferences
+    - `useGateStore` - Active gates, gate history
+    - `useWebSocketStore` - WebSocket connection state, messages
+  - **File**: `frontend/src/store/projectStore.ts`
+  - **Example**:
+    ```typescript
+    import { create } from 'zustand'
+    
+    interface ProjectState {
+      projects: Project[]
+      currentProject: Project | null
+      setProjects: (projects: Project[]) => void
+      setCurrentProject: (project: Project) => void
+    }
+    
+    export const useProjectStore = create<ProjectState>((set) => ({
+      projects: [],
+      currentProject: null,
+      setProjects: (projects) => set({ projects }),
+      setCurrentProject: (project) => set({ currentProject: project })
+    }))
+    ```
+  - **Acceptance**: Stores created, state updates work, components can access state
+  - **Test**: Component tests verify state updates
+
 - [ ] **TODO**: Build React Query for server state management
+  - **Library**: @tanstack/react-query (formerly React Query)
+  - **Installation**: `npm install @tanstack/react-query`
+  - **Purpose**: Cache server data, handle loading/error states, automatic refetch
+  - **Setup**: QueryClient and QueryClientProvider in App.tsx
+  - **Queries to Create**:
+    - `useProjects()` - Fetch all projects
+    - `useProject(id)` - Fetch single project
+    - `useAgents()` - Fetch agent statuses
+    - `useGates()` - Fetch active gates
+    - `useSettings()` - Fetch user settings
+    - `useCostData(projectId)` - Fetch cost metrics
+  - **Mutations to Create**:
+    - `useCreateProject()` - Create new project
+    - `useUpdateSettings()` - Update settings
+    - `useResolveGate()` - Resolve/reject gate
+  - **Config**: Stale time, cache time, retry logic
+  - **Acceptance**: Queries cache data, loading states work, mutations trigger refetch
+  - **Test**: Component tests with mock QueryClient
+  - **Example**:
+    ```typescript
+    import { useQuery } from '@tanstack/react-query'
+    
+    export function useProjects() {
+      return useQuery({
+        queryKey: ['projects'],
+        queryFn: async () => {
+          const res = await fetch('/api/v1/projects')
+          return res.json()
+        },
+        staleTime: 5 * 60 * 1000, // 5 minutes
+      })
+    }
+    ```
+
 - [ ] **TODO**: Implement WebSocket integration for real-time updates
+  - **Backend WebSocket**: FastAPI WebSocket endpoint `/ws/{project_id}`
+  - **Frontend Client**: Native WebSocket or use library like `socket.io-client`
+  - **Hook**: `useWebSocket(projectId)` custom hook
+  - **Events to Handle**:
+    - `agent_status_update` - Agent started/stopped/error
+    - `task_progress` - Task completion percentage
+    - `gate_created` - New gate requires attention
+    - `test_result` - Test pass/fail notification
+    - `cost_update` - Token usage update
+    - `llm_response_chunk` - Streaming LLM response
+  - **Reconnection**: Auto-reconnect with exponential backoff
+  - **Store Integration**: Update Zustand stores on WebSocket events
+  - **Acceptance**: Real-time updates work, reconnection handles disconnects
+  - **Test**: Integration test with mock WebSocket server
+  - **Example**:
+    ```typescript
+    import { useEffect } from 'react'
+    import { useWebSocketStore } from '@/store/websocketStore'
+    
+    export function useWebSocket(projectId: string) {
+      const { setConnected, addMessage } = useWebSocketStore()
+      
+      useEffect(() => {
+        const ws = new WebSocket(`ws://localhost:8000/ws/${projectId}`)
+        
+        ws.onopen = () => setConnected(true)
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data)
+          addMessage(data)
+        }
+        ws.onclose = () => setConnected(false)
+        
+        return () => ws.close()
+      }, [projectId])
+    }
+    ```
+
 - [ ] **TODO**: Add LLM response streaming and real-time display
+  - **Component**: `StreamingResponse` component
+  - **File**: `frontend/src/components/StreamingResponse.tsx`
+  - **Purpose**: Display LLM responses as they stream in (word-by-word or chunk)
+  - **Implementation**:
+    - Listen for `llm_response_chunk` WebSocket events
+    - Append chunks to text buffer
+    - Render with typewriter effect
+    - Show loading indicator while streaming
+  - **Features**:
+    - Markdown rendering (code blocks, lists, etc.)
+    - Syntax highlighting for code
+    - Copy button for code blocks
+    - Stop generation button
+  - **Libraries**: `react-markdown`, `react-syntax-highlighter`
+  - **Acceptance**: Streaming text displays smoothly, markdown renders correctly
+  - **Test**: Component test with mock streaming data
+  - **Example**:
+    ```tsx
+    import ReactMarkdown from 'react-markdown'
+    
+    export function StreamingResponse({ chunks, isStreaming }: Props) {
+      const fullText = chunks.join('')
+      
+      return (
+        <div className="streaming-response">
+          <ReactMarkdown>{fullText}</ReactMarkdown>
+          {isStreaming && <Spinner />}
+        </div>
+      )
+    }
+    ```
+
 - [ ] **TODO**: Create frontend LLM prompt editing interface
+  - **Page**: `/settings/prompts` or `/prompts`
+  - **Component**: `PromptEditor.tsx`
+  - **Features**:
+    - List all agent types with current active prompt version
+    - Select agent type → Show current prompt text
+    - Edit prompt in textarea with syntax highlighting
+    - Version number input (semantic versioning)
+    - Save creates new version (doesn't modify existing)
+    - Activate/deactivate prompt versions
+    - Show prompt performance metrics (if available)
+  - **Layout**: Split view - Agent list (left) | Prompt editor (right)
+  - **Validation**: Prevent empty prompts, enforce version format (x.y.z)
+  - **Acceptance**: Can view/edit/save prompts, version management works
+  - **Test**: E2E test full prompt editing workflow
+  - **Backend APIs**:
+    - GET `/api/v1/prompts` - List all prompts
+    - GET `/api/v1/prompts/{agent_type}` - Get active prompt for agent
+    - POST `/api/v1/prompts` - Create new prompt version
+    - PUT `/api/v1/prompts/{id}/activate` - Activate prompt version
 
 ### 4.2 Dashboard System
+
 - [ ] **TODO**: Create main dashboard with project cards
+  - **Page**: `/dashboard` (home page after login)
+  - **Component**: `Dashboard.tsx`
+  - **Layout**: Header + Project grid + "New Project" button
+  - **Data**: Fetch projects with `useProjects()` React Query hook
+  - **Real-time**: Subscribe to WebSocket for project status updates
+  - **Empty State**: Show welcome message + "Create Your First Project" CTA when no projects
+  - **Loading State**: Skeleton cards while loading
+  - **Error State**: Error message with retry button
+  - **Acceptance**: Dashboard loads projects, shows cards, real-time updates work
+  - **Test**: Component test with mock data, E2E test full dashboard
+  - **Backend API**: GET `/api/v1/projects` returns list of projects
+
 - [ ] **TODO**: Build responsive grid layout (1/2/4+ columns)
+  - **Grid**: CSS Grid or Tailwind grid classes
+  - **Breakpoints**:
+    - Mobile (< 640px): 1 column
+    - Tablet (640px - 1024px): 2 columns
+    - Desktop (1024px - 1536px): 3 columns
+    - Large Desktop (> 1536px): 4 columns
+  - **Gap**: Consistent spacing between cards (e.g., 6 or 8 in Tailwind scale)
+  - **Auto-layout**: Cards flow naturally, no fixed heights
+  - **Acceptance**: Grid adapts to screen size, no horizontal scroll on mobile
+  - **Test**: Visual regression tests at different breakpoints
+  - **Example**:
+    ```tsx
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      {projects.map(project => <ProjectCard key={project.id} project={project} />)}
+    </div>
+    ```
+
 - [ ] **TODO**: Implement rich project card information display
+  - **Component**: `ProjectCard.tsx`
+  - **Information to Display**:
+    - Project name (truncate if too long)
+    - Status badge (color-coded: green=active, yellow=waiting, red=error, gray=complete)
+    - Current phase (Workshopping, Implementation, Testing, etc.)
+    - Progress bar (0-100%)
+    - Last activity timestamp ("2 hours ago")
+    - Active agents count ("3 agents working")
+    - Cost summary ("$2.34 spent")
+    - Test status ("45/50 tests passing")
+  - **Hover State**: Elevate card, show more details
+  - **Click**: Navigate to project detail page (`/projects/{id}`)
+  - **Actions Menu**: Three-dot menu with Archive, Delete, Settings
+  - **Acceptance**: All info displays correctly, click navigation works, menu actions work
+  - **Test**: Component test with various project states
+  - **Example**:
+    ```tsx
+    export function ProjectCard({ project }: Props) {
+      return (
+        <div className="bg-slate-800 rounded-lg p-6 hover:shadow-xl transition-shadow cursor-pointer"
+             onClick={() => navigate(`/projects/${project.id}`)}>
+          <div className="flex justify-between items-start mb-4">
+            <h3 className="text-xl font-semibold">{project.name}</h3>
+            <StatusBadge status={project.status} />
+          </div>
+          <p className="text-sm text-slate-400 mb-4">{project.current_phase}</p>
+          <ProgressBar value={project.progress} />
+          <div className="flex justify-between text-xs text-slate-500 mt-4">
+            <span>{formatDistanceToNow(project.last_activity)}</span>
+            <span>${project.cost_spent.toFixed(2)}</span>
+          </div>
+        </div>
+      )
+    }
+    ```
+
 - [ ] **TODO**: Create real-time color-coded status system
+  - **Statuses**:
+    - `active` - Green (agents working, tasks executing)
+    - `waiting` - Yellow (waiting for human approval/gate)
+    - `error` - Red (agent failed, test failed, blocked)
+    - `completed` - Blue (phase or project complete)
+    - `archived` - Gray (project archived)
+  - **Component**: `StatusBadge.tsx`
+  - **Real-time Updates**: WebSocket `project_status_update` event updates badge
+  - **Visual Indicators**:
+    - Pulse animation for active status
+    - Alert icon for error status
+    - Clock icon for waiting status
+  - **Tooltip**: Hover shows detailed status message
+  - **Acceptance**: Colors accurate, real-time updates instant, tooltip helpful
+  - **Test**: Component test all statuses, E2E test status changes
+  - **Example**:
+    ```tsx
+    const statusConfig = {
+      active: { color: 'bg-green-500', label: 'Active', icon: Activity },
+      waiting: { color: 'bg-yellow-500', label: 'Waiting', icon: Clock },
+      error: { color: 'bg-red-500', label: 'Error', icon: AlertCircle },
+      completed: { color: 'bg-blue-500', label: 'Complete', icon: CheckCircle },
+      archived: { color: 'bg-gray-500', label: 'Archived', icon: Archive },
+    }
+    ```
+
 - [ ] **TODO**: Build "New Project" button functionality
+  - **Button**: Prominent CTA in dashboard header
+  - **Click**: Open modal/dialog for project creation
+  - **Modal Component**: `NewProjectModal.tsx`
+  - **Form Fields**:
+    - Project name (required, max 100 chars)
+    - Description (optional, max 500 chars)
+    - Initial phase selection (default: Workshopping)
+  - **Validation**: Name required, no duplicate names
+  - **Submit**: POST to `/api/v1/projects` with mutation
+  - **Success**: Close modal, navigate to new project detail page, show toast
+  - **Error**: Show error message in modal
+  - **Acceptance**: Can create project, validation works, navigation works
+  - **Test**: E2E test full project creation flow
+  - **Backend API**: POST `/api/v1/projects` with `{name, description, initial_phase}`
+
 - [ ] **TODO**: Add LLM agent status and activity monitoring
+  - **Component**: `AgentActivityPanel.tsx` (sidebar or separate section)
+  - **Display**:
+    - List of 10 agent types
+    - Current status per agent (idle, working, error)
+    - Current task (if working)
+    - Last activity timestamp
+    - Agent icon + name
+  - **Real-time**: WebSocket `agent_status_update` event
+  - **Click Agent**: Show agent detail panel with:
+    - Recent tasks history
+    - Token usage
+    - Current LLM config (model, temperature)
+    - Performance metrics (avg task time, success rate)
+  - **Filter**: Show all / Show active only
+  - **Acceptance**: Agent statuses accurate, real-time updates work, detail panel informative
+  - **Test**: Component test with mock data, E2E test agent activity updates
+  - **Backend API**: GET `/api/v1/agents/status` returns all agent statuses
+
 - [ ] **TODO**: Create AI-powered project insights and recommendations
+  - **Component**: `InsightsPanel.tsx`
+  - **Location**: Dashboard sidebar or top of page
+  - **Insights Generated by LLM**:
+    - "Project X is blocked - consider reviewing gate #42"
+    - "Test coverage dropped to 85% in Project Y"
+    - "Agent Backend Dev has high error rate - check logs"
+    - "Cost trending 20% higher than last week"
+    - "Orchestrator recommends: Run tests before deployment"
+  - **Frequency**: Regenerate insights every 15 minutes or on major events
+  - **Backend**: LLM analyzes project metrics, generates recommendations
+  - **UI**: Card-based, dismissible, priority-ordered
+  - **Actions**: Click insight → Navigate to relevant page/data
+  - **Acceptance**: Insights relevant, actionable, update automatically
+  - **Test**: Mock insights, verify navigation, test auto-refresh
+  - **Backend API**: GET `/api/v1/insights` returns list of insights
 
 ### 4.3 Navigation & Layout
+
 - [ ] **TODO**: Implement sidebar navigation system
+  - **Component**: `Sidebar.tsx`
+  - **Layout**: Fixed left sidebar, collapsible on mobile
+  - **Width**: 240px on desktop, slide-in drawer on mobile
+  - **Navigation Items**:
+    - Dashboard (home icon)
+    - Projects (folder icon)
+    - AI Costs (dollar-sign icon)
+    - Agents (users icon)
+    - Reporting (bar-chart icon)
+    - Archive (archive icon)
+    - Settings (settings icon)
+  - **Active State**: Highlight current page, show indicator bar
+  - **Collapse**: Hamburger menu toggle on mobile
+  - **User Menu**: At bottom - user avatar, name, logout
+  - **Acceptance**: Navigation works, active state accurate, mobile drawer works
+  - **Test**: E2E test navigation to all pages, test mobile drawer
+  - **Example**:
+    ```tsx
+    import { LayoutDashboard, FolderKanban, DollarSign, Users, BarChart3, Archive, Settings } from 'lucide-react'
+    
+    const navItems = [
+      { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+      { name: 'Projects', href: '/projects', icon: FolderKanban },
+      { name: 'AI Costs', href: '/costs', icon: DollarSign },
+      // ... etc
+    ]
+    ```
+
 - [ ] **TODO**: Create Dashboard, Reporting, AI Costs, Team, Archive, Settings pages
+  - **Dashboard**: `/dashboard` - Already covered in 4.2
+  - **Projects List**: `/projects` - Alternative view to dashboard (table instead of cards)
+  - **AI Costs**: `/costs` - Cost tracking dashboard (covered in 4.6)
+  - **Agents**: `/agents` - Agent status monitoring page
+  - **Reporting**: `/reports` - Generate and view project reports
+  - **Archive**: `/archive` - View archived projects
+  - **Settings**: `/settings` - User and system settings
+  - **Each Page Structure**:
+    - Header with page title and actions
+    - Main content area
+    - Optional sidebar for filters/details
+  - **Routing**: Use react-router-dom with protected routes
+  - **Acceptance**: All pages accessible, routing works, 404 page for invalid routes
+  - **Test**: E2E test navigation to each page
+  - **Detailed Specs**:
+    - **Reporting Page**: Generate PDF/HTML reports, select date range, filter by project
+    - **Archive Page**: List archived projects, restore/delete permanently
+    - **Agents Page**: Detailed agent monitoring (expanded version of AgentActivityPanel)
+
 - [ ] **TODO**: Build dark blue dark mode theme
+  - **Tool**: Tailwind CSS with custom color palette
+  - **Color Scheme**:
+    - Background: slate-900 (#0f172a)
+    - Surface: slate-800 (#1e293b)
+    - Primary: blue-600 (#2563eb) to blue-500 (#3b82f6)
+    - Text: slate-50 (white) to slate-400 (muted)
+    - Success: green-500, Warning: yellow-500, Error: red-500
+  - **Tailwind Config**: `tailwind.config.js`
+  - **Example**:
+    ```javascript
+    module.exports = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: { 500: '#3b82f6', 600: '#2563eb' },
+            background: '#0f172a',
+            surface: '#1e293b',
+          }
+        }
+      }
+    }
+    ```
+  - **Global Styles**: Apply dark theme by default with `<html class="dark">`
+  - **Accessibility**: Ensure sufficient contrast ratios (WCAG AA compliance)
+  - **Acceptance**: Theme looks professional, consistent colors, readable text
+  - **Test**: Visual regression tests, accessibility audit
+
 - [ ] **TODO**: Design responsive mobile layout
+  - **Breakpoints**: Follow Tailwind defaults (sm: 640px, md: 768px, lg: 1024px, xl: 1280px)
+  - **Mobile (< 768px)**:
+    - Collapsible hamburger sidebar
+    - Single column layouts
+    - Larger touch targets (min 44x44px)
+    - Bottom navigation bar (alternative to sidebar)
+  - **Tablet (768px - 1024px)**:
+    - Persistent sidebar (can collapse)
+    - 2-column layouts where appropriate
+  - **Desktop (> 1024px)**:
+    - Full sidebar always visible
+    - Multi-column layouts
+  - **Touch Optimization**: Larger buttons, swipe gestures for drawers
+  - **Acceptance**: App usable on mobile, no horizontal scroll, touch targets adequate
+  - **Test**: Manual testing on actual devices, responsive design tests
+
 - [ ] **TODO**: Add LLM cost tracking dashboard and visualizations (manual control)
+  - **Note**: Covered more comprehensively in Section 4.6.1
+  - **Page**: `/costs` - Dedicated cost dashboard
+  - **See Section 4.6.1 for full details**
+
 - [ ] **TODO**: Create AI agent performance monitoring interface
+  - **Page**: `/agents` - Full-page agent monitoring
+  - **Layout**: Split view or tabs
+  - **Agent List** (left or top):
+    - All 10 agent types
+    - Status indicators (active, idle, error)
+    - Click to view details
+  - **Agent Detail** (right or bottom):
+    - Current task and progress
+    - Recent task history (last 20 tasks)
+    - Performance metrics:
+      - Average task completion time
+      - Success rate (completed vs failed)
+      - Token usage (total, average per task)
+      - Cost (total, average per task)
+      - Error rate
+    - Configuration: Current model, temperature
+    - Activity timeline (visual representation)
+  - **Charts**:
+    - Task completion over time (line chart)
+    - Success/failure pie chart
+    - Token usage bar chart
+  - **Filters**: Date range, agent type, status
+  - **Real-time**: WebSocket updates for active agents
+  - **Acceptance**: Shows accurate metrics, real-time updates work, charts render correctly
+  - **Test**: Component tests with mock data, E2E test full page
+  - **Backend APIs**:
+    - GET `/api/v1/agents/{agent_type}/metrics` - Performance metrics
+    - GET `/api/v1/agents/{agent_type}/tasks` - Task history
+    - GET `/api/v1/agents/{agent_type}/activity` - Activity timeline
 
 ### 4.4 Project Detail Pages
+
 - [ ] **TODO**: Create comprehensive project command center
+  - **Page**: `/projects/{id}` - Main project detail page
+  - **Layout**: Multi-panel dashboard
+  - **Panels**:
+    - **Header**: Project name, status, phase, progress bar, actions (Archive, Delete, Trigger Gate)
+    - **Activity Stream** (center-left): Real-time feed of agent actions, test results, git commits
+    - **File Browser** (left sidebar): Foldable directory tree
+    - **Code Editor** (center): Monaco Editor for viewing/editing files
+    - **Agent Chat** (right sidebar): Agent conversation stream
+    - **Gates Panel** (bottom or modal): Active gates requiring human attention
+  - **Tabs**: Overview | Code | Tests | Costs | Settings
+  - **Real-time**: WebSocket for all updates (agent activity, test results, etc.)
+  - **Acceptance**: All panels load, real-time updates work, navigation smooth
+  - **Test**: E2E test full project page, test WebSocket updates
+  - **Backend APIs**:
+    - GET `/api/v1/projects/{id}` - Project details
+    - GET `/api/v1/projects/{id}/activity` - Activity stream
+    - GET `/api/v1/projects/{id}/files` - File tree
+    - GET `/api/v1/projects/{id}/gates` - Active gates
+
 - [ ] **TODO**: Build foldable file directory browser
+  - **Component**: `FileTree.tsx`
+  - **Features**:
+    - Hierarchical tree structure (folders collapse/expand)
+    - File icons by type (.py, .ts, .json, etc.)
+    - Click file → Load in editor
+    - Right-click menu: Open, Rename, Delete, New File/Folder
+    - Search/filter files
+    - Show file status icons (modified, new, deleted)
+  - **State Management**: Track expanded folders, selected file
+  - **Virtual Scrolling**: Handle large file trees (1000+ files)
+  - **Library**: Consider `react-arborist` or custom recursive component
+  - **Acceptance**: Tree navigable, click opens file, collapse/expand works, search works
+  - **Test**: Component test with mock file tree, test search
+  - **Example Structure**:
+    ```typescript
+    interface FileNode {
+      name: string
+      type: 'file' | 'folder'
+      path: string
+      children?: FileNode[]
+    }
+    ```
+
 - [ ] **TODO**: Implement Monaco Editor integration
+  - **Component**: `CodeEditor.tsx`
+  - **Library**: `@monaco-editor/react` (Monaco Editor for React)
+  - **Installation**: `npm install @monaco-editor/react`
+  - **Features**:
+    - Syntax highlighting (auto-detect from file extension)
+    - Read-only mode (default) with "Edit" button to enable editing
+    - Line numbers, minimap
+    - Find/replace
+    - Code folding
+    - IntelliSense/autocomplete (if possible)
+    - Diff view for comparing versions
+  - **Theme**: Dark theme matching app colors
+  - **Save**: "Save" button → PUT to backend
+  - **Acceptance**: Editor loads files, syntax highlighting works, can edit and save
+  - **Test**: Component test loading different file types, test save functionality
+  - **Example**:
+    ```tsx
+    import Editor from '@monaco-editor/react'
+    
+    export function CodeEditor({ file, onSave }: Props) {
+      const [value, setValue] = useState(file.content)
+      
+      return (
+        <Editor
+          height="90vh"
+          language={getLanguageFromExtension(file.extension)}
+          value={value}
+          onChange={setValue}
+          theme="vs-dark"
+          options={{ readOnly: !editMode }}
+        />
+      )
+    }
+    ```
+
 - [ ] **TODO**: Create agent chat stream viewer (read-only)
+  - **Component**: `AgentChatStream.tsx`
+  - **Location**: Right sidebar on project detail page
+  - **Purpose**: Show real-time stream of agent "thoughts" and actions
+  - **Message Types**:
+    - Agent started task
+    - Agent reasoning/planning
+    - Agent tool call (write_file, run_command, etc.)
+    - Agent result/completion
+    - Agent error
+    - Agent collaboration request
+  - **UI**: Chat-like interface, scrollable, auto-scroll to bottom
+  - **Formatting**: Markdown support, code blocks, syntax highlighting
+  - **Filter**: Filter by agent type, message type
+  - **Export**: Button to export chat history to file
+  - **Acceptance**: Messages stream in real-time, formatting works, auto-scroll works
+  - **Test**: Component test with mock messages, test auto-scroll
+  - **Backend**: WebSocket `agent_chat_message` event
+
 - [ ] **TODO**: Build manual gate trigger interface
+  - **Component**: `GatePanel.tsx` and `TriggerGateButton.tsx`
+  - **Location**: Project header ("Trigger Gate" button) + Gates panel at bottom
+  - **Trigger Gate Button**:
+    - Click → Open modal
+    - Select gate type (manual_review, security_check, custom)
+    - Enter reason/description
+    - Submit → Create gate, pause all agents
+  - **Gates Panel**:
+    - List of active gates (pending approval)
+    - Each gate shows: Type, reason, created time, requesting agent
+    - Actions: Approve (green), Reject (red), Add Feedback
+    - Approve → Resume agents, close gate
+    - Reject → Stop project, close gate, agents notified
+  - **Real-time**: New gates appear instantly via WebSocket
+  - **Acceptance**: Can trigger gate, gates appear in panel, can approve/reject, agents respond
+  - **Test**: E2E test full gate lifecycle (trigger → approve/reject → agents resume/stop)
+  - **Backend APIs**:
+    - POST `/api/v1/gates` - Create gate
+    - PUT `/api/v1/gates/{id}/resolve` - Approve/reject gate
+
 - [ ] **TODO**: Add LLM conversation history and context viewer
+  - **Component**: `ConversationHistory.tsx`
+  - **Location**: Separate tab or expandable panel on project page
+  - **Display**:
+    - List of all LLM conversations for this project
+    - Each conversation: Agent, timestamp, prompt (truncated), response (truncated)
+    - Click to expand → Show full prompt + response
+    - Token count, cost, model used
+  - **Filters**: By agent, date range, model
+  - **Search**: Search prompt/response text
+  - **Export**: Export conversations to JSON/CSV
+  - **Context Viewer**: Show what context was included (files, RAG results, collaboration history)
+  - **Acceptance**: Shows all conversations, expand works, filters work, export works
+  - **Test**: Component test with mock conversations, test filters
+  - **Backend API**: GET `/api/v1/projects/{id}/conversations`
+
 - [ ] **TODO**: Create AI decision explanation and justification display
+  - **Component**: `DecisionExplainer.tsx`
+  - **Purpose**: Show why orchestrator/agents made specific decisions
+  - **Display**:
+    - Decision description ("Selected Backend Dev agent for API implementation")
+    - Reasoning: Chain-of-thought explanation
+    - Alternatives considered: Other options with scores
+    - Confidence score
+    - Timestamp, agent responsible
+  - **Location**: Activity stream + dedicated Decisions tab
+  - **Interaction**: Click decision → Expand to show full details
+  - **Visual**: Tree or flowchart showing decision process
+  - **Acceptance**: Decisions clear, reasoning understandable, helps user understand agent behavior
+  - **Test**: Component test with mock decisions, verify formatting
+  - **Backend**: Orchestrator logs decisions to `orchestrator_decisions` table
+  - **Backend API**: GET `/api/v1/projects/{id}/decisions`
 
 ### 4.5 Settings & Configuration
+
 - [ ] **TODO**: Implement database-stored settings system
+  - **Note**: Already partially covered in Phase 1 and Section 1.2.1 (agent configs, API keys)
+  - **Additional Settings Needed**:
+    - User preferences (theme, notifications, default view)
+    - System settings (session timeout, rate limits)
+    - Project defaults (initial phase, default agents)
+  - **Backend**: Settings stored in `user_settings` table (already created in migration 003)
+  - **Frontend**: Load settings on app startup, update via mutations
+  - **Acceptance**: Settings persist across sessions, changes take effect immediately
+  - **Backend API**: GET/PUT `/api/v1/settings`
+
 - [ ] **TODO**: Create GitHub Integration settings page
+  - **Page**: `/settings/github`
+  - **Component**: `GitHubSettings.tsx`
+  - **Fields**:
+    - GitHub Personal Access Token (PAT) input
+    - Token scope requirements display (repo, workflow, read:org)
+    - Test connection button
+    - Repository selection (if connected)
+    - Enable/disable auto-commit checkbox
+    - Enable/disable auto-PR creation checkbox
+  - **Workflow**:
+    1. Enter PAT
+    2. Click "Test Connection" → Verify token has correct scopes
+    3. If valid, show repository list for selection
+    4. Save settings
+  - **Security**: Token stored encrypted in database (via backend API)
+  - **Status Indicator**: Connected (green) / Not configured (yellow) / Invalid token (red)
+  - **Help Section**: Link to GitHub PAT creation guide, scope explanation
+  - **Acceptance**: Can configure GitHub, test connection works, token encrypted
+  - **Test**: E2E test full configuration flow
+  - **Backend APIs**:
+    - POST `/api/v1/integrations/github/token` - Store encrypted token
+    - POST `/api/v1/integrations/github/test` - Test token validity
+    - GET `/api/v1/integrations/github/repos` - List accessible repos
+    - PUT `/api/v1/integrations/github/settings` - Update GitHub settings
+
 - [ ] **TODO**: Build OpenAI Integration settings page (API key config)
+  - **Note**: Already covered in Section 1.2.1 - API key configuration UI
+  - **See Section 1.2.1 for complete specification**
+  - **No additional work needed**
+
 - [ ] **TODO**: Design Agents and Specialists configuration pages (model selection)
+  - **Note**: Already covered in Section 1.2.1 - Agent model selection UI
+  - **See Section 1.2.1 for complete specification**
+  - **Additional Features** (optional enhancements):
+    - View agent performance metrics alongside config
+    - Suggest model based on historical performance
+    - Cost estimation per agent based on model selection
+
 - [ ] **TODO**: Implement encrypted credential storage
+  - **Note**: Already covered in Section 1.2.1 and authentication sections
+  - **Encryption Method**: Fernet (symmetric encryption)
+  - **Key Storage**: `ENCRYPTION_KEY` environment variable
+  - **Encrypted Items**:
+    - OpenAI API keys (Migration 004)
+    - GitHub PAT tokens
+    - SMTP passwords (Migration 021)
+    - 2FA TOTP secrets (Migration 020)
+  - **No additional implementation needed** - already specified in respective sections
+
 - [ ] **TODO**: Add LLM provider configuration and API key management (single key)
+  - **Note**: Already covered in Section 1.2.1
+  - **Single provider**: OpenAI only (for now)
+  - **No additional work needed**
+
 - [ ] **TODO**: Create prompt template editing and versioning interface
+  - **Note**: Already covered in Section 4.1 - "Create frontend LLM prompt editing interface"
+  - **See Section 4.1 for complete specification**
+  - **No additional work needed**
+- [ ] **TODO**: Review and finalize Settings page autonomy slider implementation from Phase 1
+  - **File**: `frontend/src/pages/Settings.tsx`
+  - **Review**: Verify descriptions match backend thresholds, test E2E with backend API
+  - **Acceptance**: Slider works correctly, persists to database, descriptions are accurate
+  - **Test**: Manual testing of autonomy level changes with real backend
+- [ ] **TODO**: Build per-agent LLM configuration UI (temperature & model selection)
+  - **File**: `frontend/src/pages/Settings.tsx` or new `AgentConfiguration.tsx`
+  - **Component**: Grid of agent cards, each with temperature slider and model dropdown
+  - **Models**: gpt-4o-mini (default), gpt-4o, gpt-4-turbo, gpt-3.5-turbo
+  - **Temperature**: Slider 0.0-1.0 with recommended defaults per agent type
+  - **Presets**: "Cost Optimized", "Quality Optimized", "Balanced" buttons
+  - **Acceptance**: All 11 agent types configurable, saves to database, loads current values
+  - **Test**: E2E test changing agent configs and verifying persistence
+- [ ] **TODO**: Create backend API endpoints for agent LLM configuration
+  - **File**: `backend/api/routes/agent_config.py`
+  - **Endpoints**: GET/PUT `/api/v1/settings/agent-llm-config/{agent_type}`
+  - **Payload**: `{"model": "gpt-4o-mini", "temperature": 0.3, "agent_type": "orchestrator"}`
+  - **Database**: Create `agent_llm_configs` table with user_id, agent_type, model, temperature
+  - **Acceptance**: CRUD operations work, validates model/temperature ranges, defaults applied
+  - **Test**: Unit tests for config service, integration tests for API endpoints
 
 ### 4.6 Monitoring & Cost Tracking
+
 - [ ] **TODO**: Build comprehensive metrics collection system
+  - **Backend Service**: `MetricsCollector` (already partially exists)
+  - **File**: `backend/services/metrics_collector.py`
+  - **Metrics to Collect**:
+    - LLM token usage (input/output tokens per call) - logs to `llm_token_usage` table
+    - Agent task execution times (start, end, duration)
+    - Test results (pass/fail, coverage percentage)
+    - Gate events (created, resolved, time to resolution)
+    - Error rates (per agent, per project)
+    - Cost accumulation (calculated from tokens + pricing)
+  - **Collection Points**: Hook into OpenAIAdapter, agent execution loop, test runner
+  - **Aggregation**: Real-time for dashboard, batch aggregation for reports
+  - **Acceptance**: All metrics collected accurately, minimal performance impact
+  - **Test**: Verify metrics logged, test aggregation queries
+
 - [ ] **TODO**: Implement per-LLM-call cost tracking (token usage logging)
+  - **Note**: Already specified in Section 1.2.1 and Migration 009
+  - **Table**: `llm_token_usage` (Migration 009)
+  - **Logging**: OpenAIAdapter._log_tokens() method hooks into this
+  - **Cost Calculation**: tokens × pricing (from `llm_pricing` table)
+  - **Real-time**: Calculate cost immediately after each call
+  - **Retention**: 1-year rolling deletion
+  - **No additional work needed** - already specified
+
 - [ ] **TODO**: Create cost breakdown by project, agent, and action
+  - **Backend Service**: `CostAnalyzer`
+  - **File**: `backend/services/cost_analyzer.py`
+  - **Methods**:
+    - `get_cost_by_project(project_id, date_range) -> Dict` - Total cost per project
+    - `get_cost_by_agent(project_id, date_range) -> Dict` - Cost breakdown by agent type
+    - `get_cost_by_action(project_id, date_range) -> Dict` - Cost per action (plan, code, test, etc.)
+    - `get_cost_trend(date_range) -> List` - Cost over time for charting
+  - **Queries**: Aggregate from `llm_token_usage` joined with `llm_pricing`
+  - **Caching**: Cache aggregated results for 5 minutes (trade-off for performance)
+  - **Acceptance**: Breakdowns accurate, queries performant (<1s), caching works
+  - **Test**: Unit tests with sample data, integration tests with real queries
+  - **Backend API**: GET `/api/v1/costs/breakdown?project_id=X&date_range=7d&group_by=agent`
+
 - [ ] **TODO**: Build pricing matrix management system
+  - **Note**: Already covered in Migration 010 - LLM pricing table
+  - **Additional UI**: Pricing management page (see Section 4.6.1)
+  - **No additional backend work needed**
+
 - [ ] **TODO**: Design cost reporting dashboard (manual oversight)
+  - **Note**: Covered in Section 4.6.1 - Cost dashboard with visualizations
+  - **See Section 4.6.1 for full specification**
+
 - [ ] **TODO**: Add real-time LLM usage monitoring and alerts
+  - **Component**: `CostMonitor.tsx` (widget on dashboard)
+  - **Display**:
+    - Current hourly/daily spend
+    - Spend rate (tokens/hour)
+    - Projected monthly cost
+    - Budget utilization (if budget set)
+  - **Alerts**:
+    - Warning at 80% of daily budget
+    - Critical at 100% of daily budget
+    - Notification when single call exceeds threshold (e.g., $1)
+  - **Budget Settings**: User-configurable daily/monthly budgets
+  - **Real-time**: WebSocket `cost_update` event updates display
+  - **Acceptance**: Monitors show accurate current spend, alerts trigger correctly
+  - **Test**: Simulate high usage, verify alerts trigger
+  - **Backend**: CostMonitor service checks budgets after each LLM call
+
 - [ ] **TODO**: Create AI performance metrics and optimization insights
+  - **Service**: `PerformanceAnalyzer`
+  - **File**: `backend/services/performance_analyzer.py`
+  - **Metrics**:
+    - Agent efficiency (tasks completed / time spent)
+    - Token efficiency (output quality / tokens used)
+    - Cost efficiency (value delivered / cost)
+    - Model performance comparison (gpt-4o vs gpt-4o-mini success rates)
+  - **Insights Generated**:
+    - "Backend Dev agent could use gpt-4o-mini for 80% of tasks, saving $X/month"
+    - "Test coverage improved 10% but cost increased 5% - good ROI"
+    - "Orchestrator temperature too high - consider lowering to 0.3 for cost savings"
+  - **Recommendations**: LLM analyzes metrics and suggests optimizations
+  - **Display**: Insights panel on costs dashboard
+  - **Acceptance**: Insights actionable, recommendations improve cost efficiency
+  - **Test**: Test with historical data, verify insight quality
+  - **Backend API**: GET `/api/v1/insights/performance`
 
 ### 4.6.1 Cost Tracking System (Decision 75)
-- [ ] **TODO**: Create pricing management settings page (/settings/pricing)
-- [ ] **TODO**: Build cost dashboard with visualizations (/dashboard/costs)
-- [ ] **TODO**: Implement time range selector (hour/day/week/month/quarter/year)
-- [ ] **TODO**: Create overview cards (total cost, tokens, calls)
-- [ ] **TODO**: Build line chart for cost over time
-- [ ] **TODO**: Implement bar chart for cost by project
-- [ ] **TODO**: Create pie chart for cost by agent
-- [ ] **TODO**: Build drill-down table (cost by agent per project)
-- [ ] **TODO**: Implement pricing matrix editing UI
-- [ ] **TODO**: Create manual pricing update interface
 
-### 4.7 Archive System
+- [ ] **TODO**: Create pricing management settings page (/settings/pricing)
+  - **Page**: `/settings/pricing`
+  - **Component**: `PricingSettings.tsx`
+  - **Display**: Table of all LLM models with current pricing
+  - **Columns**: Model name, Input cost per 1M tokens, Output cost per 1M tokens, Effective date, Last updated
+  - **Edit**: Click row → Edit modal with input fields
+  - **Validation**: Positive numbers only, confirm before saving
+  - **History**: Show pricing history (past 12 months)
+  - **Import**: Button to import latest OpenAI pricing via API (if available) or manual CSV upload
+  - **Acceptance**: Can update pricing, history tracked, changes reflect in cost calculations
+  - **Test**: E2E test updating pricing, verify cost recalculation
+  - **Backend API**: GET/PUT `/api/v1/pricing`, GET `/api/v1/pricing/history`
+
+- [ ] **TODO**: Build cost dashboard with visualizations (/dashboard/costs or /costs)
+  - **Page**: `/costs`
+  - **Component**: `CostDashboard.tsx`
+  - **Layout**: Overview cards (top) + Charts (middle) + Drill-down table (bottom)
+  - **Real-time Updates**: WebSocket for current spend
+  - **Export**: Button to export data to CSV/Excel
+  - **Acceptance**: Dashboard loads quickly, charts interactive, data accurate
+  - **Test**: Component test with mock data, E2E test full dashboard
+
+- [ ] **TODO**: Implement time range selector (hour/day/week/month/quarter/year)
+  - **Component**: `TimeRangeSelector.tsx`
+  - **Options**: Last hour, Today, Last 7 days, Last 30 days, Last quarter, Last year, Custom range
+  - **Custom Range**: Date picker for start/end dates
+  - **State**: Selected range updates all charts/tables
+  - **URL Sync**: Range in URL query params for sharing
+  - **Acceptance**: Selector updates all visualizations, custom range works
+  - **Test**: Component test all options, verify state updates
+
+- [ ] **TODO**: Create overview cards (total cost, tokens, calls)
+  - **Component**: `CostOverviewCards.tsx`
+  - **Cards**:
+    1. **Total Cost**: $X.XX with trend indicator (↑5% vs previous period)
+    2. **Total Tokens**: X.XM tokens (input + output)
+    3. **Total Calls**: X,XXX API calls
+    4. **Average Cost per Call**: $X.XX
+  - **Styling**: Card layout with large number, trend icon, comparison text
+  - **Acceptance**: Cards show accurate totals, trends calculated correctly
+  - **Test**: Component test with mock data
+
+- [ ] **TODO**: Build line chart for cost over time
+  - **Component**: `CostTrendChart.tsx`
+  - **Library**: recharts or chart.js
+  - **Installation**: `npm install recharts`
+  - **X-axis**: Time (hours, days, weeks depending on range)
+  - **Y-axis**: Cost ($)
+  - **Lines**: Total cost, with optional split by project (toggle)
+  - **Interaction**: Hover for exact values, click to drill down
+  - **Acceptance**: Chart renders smoothly, interactive tooltips work
+  - **Test**: Component test with sample time series data
+  - **Example**:
+    ```tsx
+    import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from 'recharts'
+    
+    <LineChart data={costData}>
+      <XAxis dataKey="date" />
+      <YAxis />
+      <Tooltip />
+      <Legend />
+      <Line type="monotone" dataKey="cost" stroke="#3b82f6" />
+    </LineChart>
+    ```
+
+- [ ] **TODO**: Implement bar chart for cost by project
+  - **Component**: `CostByProjectChart.tsx`
+  - **X-axis**: Project names
+  - **Y-axis**: Cost ($)
+  - **Bars**: Color-coded by cost level (green=low, yellow=medium, red=high)
+  - **Sorting**: Sort by cost (descending) or alphabetically
+  - **Limit**: Show top 10 projects, "View All" button for full list
+  - **Interaction**: Click bar → Navigate to project cost detail page
+  - **Acceptance**: Chart accurate, sorting works, click navigation works
+  - **Test**: Component test with mock projects
+
+- [ ] **TODO**: Create pie chart for cost by agent
+  - **Component**: `CostByAgentChart.tsx`
+  - **Slices**: One per agent type (10 agents)
+  - **Labels**: Agent name + percentage
+  - **Colors**: Distinct color per agent
+  - **Legend**: List of agents with colors
+  - **Interaction**: Click slice → Show agent detail panel
+  - **Acceptance**: Pie chart adds to 100%, colors distinguishable, interactive
+  - **Test**: Component test with mock agent costs
+
+- [ ] **TODO**: Build drill-down table (cost by agent per project)
+  - **Component**: `CostDrillDownTable.tsx`
+  - **Layout**: Expandable rows
+  - **Top Level**: Project name, total cost
+  - **Expanded**: Breakdown by agent (agent name, calls, tokens, cost)
+  - **Columns**: Project, Agent, Calls, Input Tokens, Output Tokens, Total Cost
+  - **Sorting**: Sort by any column
+  - **Filtering**: Filter by project or agent
+  - **Pagination**: 20 rows per page
+  - **Export**: CSV export button
+  - **Acceptance**: Table shows accurate data, expand/collapse works, sort/filter works
+  - **Test**: Component test with mock data, test sorting
+
+- [ ] **TODO**: Implement pricing matrix editing UI
+  - **Note**: Covered in first task of this section (pricing management settings page)
+  - **No additional work needed**
+
+- [ ] **TODO**: Create manual pricing update interface
+  - **Note**: Covered in first task of this section (pricing management settings page)
+  - **No additional work needed**
+
+### 4.7 User Authentication with 2FA
+**Priority**: P1 - BLOCKING (Required before any multi-user features)  
+**Reference**: `docs/architecture/decision-84-user-authentication-2fa.md`
+
+#### Backend Authentication System
+
+- [ ] **TODO**: Create users table with secure password storage
+  - **Migration**: `alembic/versions/019_create_users_table.py`
+  - **Schema**: id (UUID), email (UNIQUE), password_hash (bcrypt), is_active, is_verified, created_at, updated_at
+  - **Indexes**: idx_users_email (unique), idx_users_active
+  - **Security**: Use bcrypt for password hashing, min 12 rounds
+  - **Acceptance**: Table stores user credentials securely, email uniqueness enforced
+  - **Test**: Create users, verify password hashing, test uniqueness constraint
+
+- [ ] **TODO**: Create user_sessions table for JWT token management
+  - **Migration**: Same as users table migration
+  - **Schema**: id (UUID), user_id (FK users), refresh_token_hash, expires_at, created_at, ip_address, user_agent
+  - **Indexes**: idx_sessions_user, idx_sessions_token, idx_sessions_expiry
+  - **Purpose**: Track active sessions, support token revocation, detect suspicious activity
+  - **Acceptance**: Sessions tracked, tokens revocable, expired sessions cleanable
+  - **Test**: Create session, verify token tracking, test expiry cleanup
+
+- [ ] **TODO**: Create two_factor_auth table for 2FA secrets
+  - **Migration**: `alembic/versions/020_create_2fa_table.py`
+  - **Schema**: id (UUID), user_id (FK users, UNIQUE), secret_encrypted (Fernet), backup_codes_encrypted (JSONB), email_fallback_enabled (default true), enabled_at, last_used_at
+  - **Encryption**: Use Fernet encryption for TOTP secrets, separate encryption key from password key
+  - **Backup Codes**: Generate 10 single-use backup codes during setup
+  - **Acceptance**: 2FA secrets stored encrypted, backup codes supported, email fallback configurable
+  - **Test**: Store/retrieve secrets, verify encryption, test backup codes
+
+- [ ] **TODO**: Create user_invites table for invite-only signup
+  - **Migration**: Same as users table migration (019)
+  - **Schema**: id (UUID), email (VARCHAR), invite_token (UUID UNIQUE), invited_by (FK users), expires_at (48 hours), consumed_at, created_at
+  - **Indexes**: idx_invites_token (unique), idx_invites_email, idx_invites_expiry
+  - **Purpose**: Track invite tokens, prevent duplicate invites, audit who invited whom
+  - **Acceptance**: Invites tracked, single-use tokens, expired invites cleanable
+  - **Test**: Create invite, redeem invite, test expiry, verify uniqueness
+
+- [ ] **TODO**: Create bootstrap admin user script (solves chicken-and-egg problem)
+  - **File**: `backend/scripts/create_admin_user.py`
+  - **Purpose**: Create first admin user WITHOUT invite (bypasses invite-only system)
+  - **Usage**: `python -m backend.scripts.create_admin_user --email admin@example.com --password <secure-password>`
+  - **Security**: 
+    - Only works when users table is empty (SELECT COUNT(*) FROM users = 0)
+    - Requires strong password (12+ chars, complexity rules)
+    - Logs admin creation with timestamp
+    - Cannot run twice (raises error if users exist)
+  - **Process**: 
+    1. Check users table is empty
+    2. Validate email format and password strength
+    3. Hash password with bcrypt (12 rounds)
+    4. Insert admin user with is_verified=true
+    5. Log creation to console
+  - **Acceptance**: First admin created, can login and create invites for other users
+  - **Test**: Run script, verify admin created, test cannot run again with existing users
+  - **Example**:
+    ```bash
+    # Create first admin
+    python -m backend.scripts.create_admin_user \
+      --email admin@example.com \
+      --password "SecureP@ssw0rd123"
+    
+    # Output:
+    # Admin user created successfully
+    # Email: admin@example.com
+    # User ID: 550e8400-e29b-41d4-a716-446655440000
+    # You can now login and invite other users
+    ```
+
+- [ ] **TODO**: Implement AuthService with registration, login, and token management
+  - **File**: `backend/services/auth_service.py`
+  - **Class**: `AuthService` with methods:
+    - `register(email, password) -> User` - Create user with hashed password
+    - `login(email, password) -> TokenPair` - Authenticate and issue JWT tokens
+    - `refresh_token(refresh_token) -> TokenPair` - Issue new access token
+    - `logout(user_id, session_id)` - Revoke session
+    - `verify_email(token)` - Email verification flow
+  - **JWT Tokens**: Access token (15min), refresh token (7 days), signed with HS256
+  - **Validation**: Email format, password strength (min 12 chars, uppercase, lowercase, number, special)
+  - **Acceptance**: Full auth flow works, tokens secure, sessions tracked
+  - **Test**: Unit tests for all methods, integration tests for auth flow
+
+- [ ] **TODO**: Implement TwoFactorService for TOTP-based 2FA with email fallback
+  - **File**: `backend/services/two_factor_service.py`
+  - **Class**: `TwoFactorService` with methods:
+    - `setup_2fa(user_id) -> (secret, qr_code_url)` - Generate TOTP secret and QR code
+    - `verify_2fa_setup(user_id, token) -> bool` - Verify token and enable 2FA
+    - `verify_2fa(user_id, token) -> bool` - Verify TOTP token during login
+    - `send_email_otp(user_id) -> str` - Generate and send 6-digit OTP via email (10min expiry)
+    - `verify_email_otp(user_id, code) -> bool` - Verify emailed OTP code
+    - `generate_backup_codes(user_id) -> List[str]` - Generate 10 backup codes
+    - `use_backup_code(user_id, code) -> bool` - Consume backup code
+    - `disable_2fa(user_id, password)` - Disable 2FA after password verification
+  - **Library**: Use `pyotp` for TOTP generation/verification
+  - **QR Code**: Generate QR code data URI for authenticator app scanning
+  - **Email OTP**: Store in Redis/memory with 10min TTL, rate limit 3 per hour
+  - **Acceptance**: Full 2FA lifecycle works, backup codes functional, email OTP fallback works
+  - **Test**: Setup 2FA, verify TOTP tokens, test email OTP, test backup codes, disable 2FA
+
+- [ ] **TODO**: Create authentication API endpoints
+  - **File**: `backend/api/routes/auth.py`
+  - **Endpoints**:
+    - POST `/api/v1/auth/register` - User registration via invite token
+    - POST `/api/v1/auth/login` - Login (returns tokens + 2FA status)
+    - POST `/api/v1/auth/login/2fa` - Complete login with 2FA token
+    - POST `/api/v1/auth/refresh` - Refresh access token
+    - POST `/api/v1/auth/logout` - Logout and revoke session
+    - GET `/api/v1/auth/me` - Get current user info (requires auth)
+    - GET `/api/v1/auth/sessions` - Get user's active sessions
+    - DELETE `/api/v1/auth/sessions/{session_id}` - Revoke specific session
+  - **Rate Limiting**: Max 5 login attempts per 15min per account, 10 per IP
+  - **Acceptance**: All endpoints work, proper error handling, rate limiting enforced
+  - **Test**: Integration tests for all endpoints, test rate limiting
+
+- [ ] **TODO**: Create invite management API endpoints
+  - **File**: `backend/api/routes/invites.py`
+  - **Endpoints**:
+    - POST `/api/v1/invites` - Create new invite (admin only)
+    - GET `/api/v1/invites` - List pending invites (admin only)
+    - DELETE `/api/v1/invites/{invite_id}` - Cancel invite (admin only)
+    - GET `/api/v1/invites/validate/{token}` - Validate invite token (public)
+  - **Payload**: `{"email": "user@example.com"}` for invite creation
+  - **Response**: Returns invite token and copyable signup link
+  - **Acceptance**: Invite management works, tokens validated, admin-only enforcement
+  - **Test**: Create invite, validate token, redeem invite, cancel invite
+
+- [ ] **TODO**: Create 2FA setup/management API endpoints
+  - **File**: `backend/api/routes/two_factor.py`
+  - **Endpoints**:
+    - POST `/api/v1/2fa/setup` - Initialize 2FA setup (returns secret + QR)
+    - POST `/api/v1/2fa/verify-setup` - Verify token and enable 2FA
+    - POST `/api/v1/2fa/send-email-otp` - Send OTP code via email (fallback)
+    - POST `/api/v1/2fa/verify-email-otp` - Verify email OTP code
+    - GET `/api/v1/2fa/backup-codes` - Get backup codes (requires password)
+    - POST `/api/v1/2fa/regenerate-backup-codes` - Generate new backup codes
+    - PUT `/api/v1/2fa/toggle-email-fallback` - Enable/disable email OTP fallback
+    - DELETE `/api/v1/2fa` - Disable 2FA (requires password)
+  - **Authentication**: All endpoints require valid JWT access token
+  - **Rate Limiting**: Email OTP max 3 sends per hour per account
+  - **Acceptance**: Full 2FA management works, email OTP fallback functional, secure
+  - **Test**: Integration tests for 2FA lifecycle including email OTP
+
+- [ ] **TODO**: Implement JWT authentication middleware
+  - **File**: `backend/api/middleware/auth_middleware.py`
+  - **Middleware**: FastAPI dependency `get_current_user(token: str)` 
+  - **Validation**: Verify JWT signature, check expiry, validate session exists
+  - **Error Handling**: Return 401 for invalid/expired tokens, 403 for inactive users
+  - **Usage**: Add `user: User = Depends(get_current_user)` to protected endpoints
+  - **Acceptance**: Middleware protects endpoints, rejects invalid tokens
+  - **Test**: Test valid tokens, expired tokens, tampered tokens, revoked sessions
+
+- [ ] **TODO**: Implement rate limiting middleware for auth endpoints
+  - **File**: `backend/api/middleware/rate_limit.py`
+  - **Strategy**: Token bucket algorithm, keyed by IP address
+  - **Limits**: 5 login attempts per 15min, 10 registration attempts per hour
+  - **Storage**: In-memory dict for now (replace with Redis in production)
+  - **Response**: 429 Too Many Requests with Retry-After header
+  - **Acceptance**: Rate limits enforced, prevents brute force attacks
+  - **Test**: Trigger rate limits, verify 429 responses, test reset timing
+
+#### Frontend Authentication UI
+
+- [ ] **TODO**: Create login page (/login)
+  - **File**: `frontend/src/pages/Login.tsx`
+  - **Form**: Email input, password input (with show/hide toggle), remember me checkbox
+  - **Validation**: Client-side email/password format validation
+  - **Flow**: Submit → If 2FA enabled → redirect to 2FA page, else → redirect to dashboard
+  - **Error Handling**: Display auth errors (invalid credentials, account locked, etc.)
+  - **Design**: Clean, modern, dark mode support, Headless UI components
+  - **Acceptance**: Login works, validates input, handles errors gracefully
+  - **Test**: Component tests, E2E test login flow
+
+- [ ] **TODO**: Create registration page (/register?token=xxx)
+  - **File**: `frontend/src/pages/Register.tsx`
+  - **Flow**: Extract invite token from URL → Validate token → Display pre-filled email (readonly)
+  - **Form**: Email (readonly), password, confirm password, terms acceptance checkbox
+  - **Validation**: Real-time password strength indicator, match confirmation
+  - **Password Rules**: Display requirements (12+ chars, uppercase, lowercase, number, special)
+  - **Submit**: Create account → Auto-login → Redirect to dashboard
+  - **Error Handling**: Invalid/expired invite token, email already registered
+  - **Acceptance**: Invite-based registration works, validates input, displays clear feedback
+  - **Test**: Component tests, E2E test invite redemption flow
+
+- [ ] **TODO**: Create 2FA verification page (/login/2fa)
+  - **File**: `frontend/src/pages/TwoFactorVerify.tsx`
+  - **Form**: 6-digit TOTP code input (auto-focus, auto-submit on 6 digits)
+  - **Alternatives**: 
+    - "Use backup code" link → Switch to backup code input
+    - "Send code to email" button → Request email OTP (rate limited: 3/hour)
+  - **Countdown**: Display time remaining for current TOTP code (30s window)
+  - **Email OTP**: Show "Code sent!" confirmation, switch to email OTP input mode
+  - **Error Handling**: Invalid code, expired code, rate limiting, email send failures
+  - **Flow**: Verify code → Redirect to dashboard with auth tokens
+  - **Acceptance**: 2FA verification works, backup codes and email OTP supported
+  - **Test**: Component tests, E2E test 2FA flow with TOTP/backup/email OTP
+
+- [ ] **TODO**: Create 2FA setup page (/settings/2fa)
+  - **File**: `frontend/src/pages/TwoFactorSetup.tsx`
+  - **Display**: Show QR code for scanning with authenticator app
+  - **Manual Entry**: Display secret key for manual entry in app
+  - **Verification**: Input field for test TOTP code to confirm setup
+  - **Backup Codes**: Display 10 backup codes after successful setup, download/print options
+  - **Warning**: Emphasize importance of saving backup codes
+  - **Acceptance**: Setup flow works, QR scannable, backup codes displayed
+  - **Test**: Component tests, E2E test setup flow
+
+- [ ] **TODO**: Create 2FA management section in settings
+  - **File**: `frontend/src/pages/Settings.tsx` - Add 2FA section
+  - **Status Display**: Show whether 2FA is enabled/disabled
+  - **Actions**: Enable 2FA, disable 2FA (requires password), regenerate backup codes
+  - **Email Fallback Toggle**: Enable/disable email OTP fallback option
+  - **View Backup Codes**: Modal requiring password re-entry to view codes
+  - **Acceptance**: Full 2FA management available, email fallback configurable, secure password re-entry
+  - **Test**: Component tests, E2E test management actions
+
+- [ ] **TODO**: Create user invite management UI in settings
+  - **File**: `frontend/src/pages/Settings.tsx` - Add User Management section (admin only)
+  - **Invite Form**: Email input field, "Send Invite" button
+  - **Pending Invites**: Table showing email, invited by, created date, expires date, status
+  - **Actions**: Copy invite link (modal with copyable URL), cancel invite (confirmation dialog)
+  - **Display**: Show invite link in modal after creation (no auto-email initially)
+  - **Note**: Admin manually shares invite link with user until SMTP configured
+  - **Acceptance**: Invite creation works, link copyable, pending list displays, cancellation works
+  - **Test**: Component tests, E2E test invite workflow
+
+- [ ] **TODO**: Implement auth state management with Zustand
+  - **File**: `frontend/src/stores/authStore.ts`
+  - **State**: `{ user: User | null, accessToken: string | null, isAuthenticated: bool }`
+  - **Actions**: `login(tokens)`, `logout()`, `setUser(user)`, `refreshToken()`
+  - **Persistence**: Store refresh token in httpOnly cookie (via API), access token in memory only
+  - **Auto-Refresh**: Refresh access token 2min before expiry using refresh token
+  - **Acceptance**: Auth state persists across page reloads, tokens managed securely
+  - **Test**: Test state updates, token refresh, logout clears state
+
+- [ ] **TODO**: Create ProtectedRoute component for authenticated pages
+  - **File**: `frontend/src/components/ProtectedRoute.tsx`
+  - **Logic**: Check auth state → If authenticated, render children, else redirect to /login
+  - **Loading State**: Show loading spinner while checking auth
+  - **Usage**: Wrap all protected pages (dashboard, settings, etc.)
+  - **Acceptance**: Protects pages from unauthenticated access
+  - **Test**: Test authenticated/unauthenticated access, redirect behavior
+
+- [ ] **TODO**: Implement automatic token refresh mechanism
+  - **File**: `frontend/src/utils/tokenRefresh.ts`
+  - **Strategy**: Set interval to check token expiry every 60s
+  - **Refresh Trigger**: When access token expires in <2min, call refresh endpoint
+  - **Error Handling**: If refresh fails, logout user and redirect to login
+  - **Acceptance**: Tokens refresh transparently, sessions stay active
+  - **Test**: Test refresh timing, error handling, logout on refresh failure
+
+- [ ] **TODO**: Create email verification page (/verify-email)
+  - **File**: `frontend/src/pages/VerifyEmail.tsx`
+  - **Flow**: Extract token from URL → Call verify endpoint → Show success/error
+  - **Success**: Display success message, redirect to login after 3s
+  - **Error**: Display error message, offer resend verification email
+  - **Acceptance**: Email verification works, clear feedback
+  - **Test**: E2E test verification flow
+
+- [ ] **TODO**: Add logout functionality to navigation
+  - **File**: `frontend/src/components/Navigation.tsx`
+  - **Button**: User menu dropdown with "Logout" option
+  - **Action**: Call logout endpoint → Clear auth state → Redirect to login
+  - **Confirmation**: Optional "Are you sure?" modal for accidental clicks
+  - **Acceptance**: Logout works, clears tokens, redirects properly
+  - **Test**: Test logout action, verify state cleared
+
+#### Security & Testing
+
+- [ ] **TODO**: Implement comprehensive auth security tests
+  - **File**: `backend/tests/security/test_auth_security.py`
+  - **Tests**:
+    - Password hashing security (bcrypt rounds, no plaintext storage)
+    - JWT token tampering detection
+    - Session hijacking prevention
+    - Rate limiting effectiveness
+    - 2FA secret encryption
+    - SQL injection prevention in auth queries
+  - **Acceptance**: All security tests pass, no vulnerabilities
+  - **Test**: Run security test suite, verify all attack vectors blocked
+
+- [ ] **TODO**: Create E2E authentication flow tests
+  - **File**: `frontend/tests/e2e/auth.spec.ts`
+  - **Tests**:
+    - Full registration → email verification → login flow
+    - Login → dashboard navigation
+    - 2FA setup → verify TOTP → login with 2FA
+    - Backup code usage
+    - Logout → verify protected page access denied
+    - Token refresh during active session
+  - **Acceptance**: All E2E flows work end-to-end
+  - **Test**: Run E2E test suite, verify coverage
+
+- [ ] **TODO**: Document authentication architecture and security measures
+  - **File**: `docs/architecture/decision-84-user-authentication-2fa.md` (COMPLETED)
+  - **Content**: Architecture overview, security considerations, token lifecycle, 2FA flow, threat model
+  - **Diagrams**: Authentication flow diagram, 2FA setup flow, session management
+  - **Acceptance**: Complete documentation for developers and security review
+  - **Review**: Security audit by team lead
+
+#### SMTP Email Service Integration (Phase 2)
+
+- [ ] **TODO**: Create email_settings table for SMTP configuration
+  - **Migration**: `alembic/versions/021_create_email_settings.py`
+  - **Schema**: id (UUID), smtp_host, smtp_port, smtp_username, smtp_password_encrypted (Fernet), from_email, from_name, use_tls (default true), is_enabled (default false), updated_at
+  - **Encryption**: Use Fernet encryption for SMTP password, separate key from other secrets
+  - **Purpose**: Store configurable SMTP settings for email sending
+  - **Acceptance**: Settings stored encrypted, single row enforced (config singleton)
+  - **Test**: Store/retrieve settings, verify password encryption
+
+- [ ] **TODO**: Create email template system (MUST COMPLETE BEFORE EmailService)
+  - **Directory**: `backend/templates/emails/`
+  - **Templates**:
+    - `invite.html` / `invite.txt` - User invitation email
+    - `otp.html` / `otp.txt` - 2FA OTP code email
+    - `security_alert.html` / `security_alert.txt` - Security notifications
+    - `welcome.html` / `welcome.txt` - Welcome email after signup (optional)
+  - **Variables**: Jinja2 templating with {{user_name}}, {{invite_link}}, {{otp_code}}, etc.
+  - **Styling**: Inline CSS for email client compatibility, responsive design
+  - **Acceptance**: Templates render correctly, variables inject properly, mobile-friendly
+  - **Test**: Render templates with test data, verify output HTML/text
+  - **Example Template (invite.html)**:
+    ```html
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .button { background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>You're invited to TheAppApp!</h1>
+        <p>Hi there,</p>
+        <p>{{inviter_name}} has invited you to join TheAppApp. Click the button below to create your account:</p>
+        <p><a href="{{invite_link}}" class="button">Accept Invitation</a></p>
+        <p>Or copy this link: {{invite_link}}</p>
+        <p>This invitation expires in 48 hours.</p>
+      </div>
+    </body>
+    </html>
+    ```
+  - **Example Template (invite.txt)**:
+    ```
+    You're invited to TheAppApp!
+    
+    Hi there,
+    
+    {{inviter_name}} has invited you to join TheAppApp.
+    
+    Click this link to create your account:
+    {{invite_link}}
+    
+    This invitation expires in 48 hours.
+    
+    ---
+    TheAppApp Team
+    ```
+
+- [ ] **TODO**: Implement EmailService for SMTP email sending (DEPENDS ON: email templates)
+  - **File**: `backend/services/email_service.py`
+  - **Class**: `EmailService` with methods:
+    - `send_invite_email(to: str, invite_link: str, inviter_name: str) -> bool` - Send invite email
+    - `send_otp_email(to: str, otp_code: str) -> bool` - Send 2FA OTP code
+    - `send_security_alert(to: str, alert_type: str, details: dict) -> bool` - Send security notification
+    - `test_connection() -> bool` - Test SMTP connection
+  - **Library**: Use Python `smtplib` with TLS support
+  - **Templates**: Load from `backend/templates/emails/` using Jinja2
+  - **Queue**: Background thread for async email sending (don't block requests)
+  - **Error Handling**: Log failures, return success/failure, retry logic (max 3 attempts)
+  - **Acceptance**: Emails send successfully, templates render correctly, queue works
+  - **Test**: Unit tests with mock SMTP, integration tests with real SMTP test server
+  - **Example Usage**:
+    ```python
+    email_service = EmailService()
+    success = await email_service.send_invite_email(
+        to="user@example.com",
+        invite_link="https://app.example.com/register?token=abc123",
+        inviter_name="John Doe"
+    )
+    ```
+
+- [ ] **TODO**: Create SMTP settings API endpoints
+  - **File**: `backend/api/routes/email_settings.py`
+  - **Endpoints**:
+    - GET `/api/v1/email/settings` - Get current SMTP config (admin only)
+    - PUT `/api/v1/email/settings` - Update SMTP config (admin only)
+    - POST `/api/v1/email/test` - Test SMTP connection (admin only)
+    - POST `/api/v1/email/test-send` - Send test email (admin only)
+  - **Payload**: `{"smtp_host": "smtp.gmail.com", "smtp_port": 587, ...}`
+  - **Security**: Encrypt password before storing, mask password in responses
+  - **Acceptance**: Config CRUD works, test connection works, secure
+  - **Test**: Integration tests for all endpoints
+
+- [ ] **TODO**: Create SMTP configuration UI in frontend settings
+  - **File**: `frontend/src/pages/Settings.tsx` - Add Email Configuration section (admin only)
+  - **Form Fields**:
+    - SMTP Host (text input)
+    - SMTP Port (number input, default 587)
+    - Username (text input)
+    - Password (password input, show/hide toggle)
+    - From Email (text input, with validation)
+    - From Name (text input)
+    - Use TLS (toggle, default on)
+    - Enable Email Service (toggle, default off)
+  - **Actions**:
+    - "Test Connection" button - Test SMTP settings without saving
+    - "Send Test Email" button - Send test email to admin's address
+    - "Save Settings" button - Save and enable email service
+  - **Status Indicator**: Show connection status (connected, disconnected, error)
+  - **Help Text**: Instructions for Gmail, Outlook, custom SMTP setup
+  - **Acceptance**: Config UI works, test buttons functional, settings save correctly
+  - **Test**: Component tests, E2E test SMTP configuration flow
+
+- [ ] **TODO**: Add email queue monitoring and logs
+  - **File**: `backend/services/email_queue.py`
+  - **Functionality**:
+    - Queue emails for background sending (asyncio queue or thread pool)
+    - Track send status (pending, sent, failed)
+    - Retry failed emails (max 3 attempts with exponential backoff)
+    - Store send logs in database (email_logs table)
+  - **Table**: `email_logs` - id, to_email, subject, template, status, sent_at, error_message
+  - **Acceptance**: Queue processes emails, retries work, logs persisted
+  - **Test**: Test queue processing, retry logic, error handling
+
+- [ ] **TODO**: Create email logs viewer UI in settings
+  - **File**: `frontend/src/pages/Settings.tsx` - Add Email Logs section (admin only)
+  - **Display**: Table showing recent emails (last 100), filterable by status/recipient
+  - **Columns**: Recipient, Subject, Template, Status, Sent At, Error (if failed)
+  - **Actions**: Refresh logs, filter by status, search by recipient
+  - **Real-time Updates**: Auto-refresh every 30s when page open
+  - **Acceptance**: Logs display correctly, filters work, updates automatically
+  - **Test**: Component tests, E2E test log viewing
+
+- [ ] **TODO**: Update invite system to auto-send emails when SMTP enabled
+  - **File**: `backend/services/auth_service.py` - Update invite creation
+  - **Logic**: When admin creates invite AND email service enabled → Auto-send invite email
+  - **Fallback**: If email disabled or send fails → Show copyable link in UI
+  - **Status**: Track whether invite email was sent successfully
+  - **Acceptance**: Auto-send works when enabled, fallback to manual link works
+  - **Test**: Test with email enabled/disabled, test send failures
+
+- [ ] **TODO**: Add email OTP automatic sending
+  - **File**: `backend/services/two_factor_service.py` - Update `send_email_otp()`
+  - **Logic**: Generate OTP → Send via EmailService → Store OTP with expiry
+  - **Rate Limiting**: Max 3 email OTPs per hour per account
+  - **Error Handling**: If email fails, return error to user (don't silently fail)
+  - **Acceptance**: Email OTP sends automatically, rate limiting enforced
+  - **Test**: Test email OTP flow, verify rate limiting
+
+- [ ] **TODO**: Document email service setup and configuration
+  - **File**: `docs/operations/email-service-setup.md`
+  - **Content**:
+    - Gmail SMTP setup instructions (App Passwords required)
+    - Outlook/Office365 SMTP setup
+    - Custom SMTP server setup
+    - TLS/SSL configuration
+    - Troubleshooting common issues
+    - Rate limit considerations (Gmail: 500/day, etc.)
+  - **Acceptance**: Complete setup guide for admins
+  - **Review**: Test instructions with real Gmail/Outlook accounts
+
+### 4.8 Archive System
 - [ ] **TODO**: Create project archive page
 - [ ] **TODO**: Build completed/cancelled project listing
 - [ ] **TODO**: Implement GitHub repository management (view/delete)
