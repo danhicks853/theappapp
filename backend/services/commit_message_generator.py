@@ -7,7 +7,7 @@ Analyzes code diffs to generate semantic, descriptive commit messages.
 Reference: Phase 2.4 - GitHub Integration (deferred from Phase 3+)
 """
 import logging
-from typing import Optional, List
+from typing import Optional, List, Any
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)

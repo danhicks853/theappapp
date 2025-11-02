@@ -1803,8 +1803,6 @@ The following features were originally planned for migrations 006-010 but those 
 
 ## Phase 2: Tool Ecosystem Implementation
 
----
-
 ### 2.1 Code Execution Sandbox
 
 - [x] **COMPLETED**: Design Docker-based sandbox system for LLM-generated code
@@ -2283,19 +2281,67 @@ The following features were originally planned for migrations 006-010 but those 
   - Retry logic with exponential backoff (1s, 2s, 4s) ✅
   - Gate triggering on failures ✅
   - **Completed**: Nov 2, 2025
-- [ ] **TODO**: Build milestone-based PR workflow (existing gates)
-  - **Status**: Deferred to Phase 3+ (gate system integration)
-- [ ] **TODO**: Implement straight-to-main branch strategy
-  - **Status**: Deferred to Phase 3+ (workflow automation)
+- [x] **COMPLETED**: Build milestone-based PR workflow (existing gates)
+  - **File**: `backend/services/milestone_pr_workflow.py` ✅ (345 lines)
+  - **Features**: ✅
+    - `create_milestone_pr()` - Creates PR for completed deliverables
+    - `wait_for_approval()` - Waits for gate approval (blocking)
+    - `merge_milestone_pr()` - Merges approved milestone PR
+    - `handle_rejection()` - Creates revision task on rejection
+  - **Gate Integration**: Creates gate for PR review, polls status, triggers agent revision ✅
+  - **Workflow**: Complete deliverables → Create PR → Trigger gate → Approve/Reject → Merge/Revise ✅
+  - **Data Model**: MilestonePR with milestone_id, deliverable_ids, pr_number, gate_id, status ✅
+  - **Acceptance**: Integrates milestones, PRs, and gates into cohesive workflow ✅
+  - **Completed**: Nov 2, 2025
+
+- [x] **COMPLETED**: Implement straight-to-main branch strategy
+  - **File**: `backend/services/straight_to_main_workflow.py` ✅ (353 lines)
+  - **Features**: ✅
+    - `request_commit_to_main()` - Requests direct commit with gate
+    - `execute_commit()` - Commits to main after approval
+    - `batch_commit()` - Batch multiple commits with single gate
+    - `is_suitable_for_main()` - Determines if changes bypass PR workflow
+  - **Suitability Criteria**: <50 lines changed, docs/config files, no breaking changes ✅
+  - **Safe Extensions**: .md, .txt, .json, .yml, .yaml, .toml, .ini ✅
+  - **Gate Integration**: Creates gate before commit, waits for approval ✅
+  - **Data Model**: DirectCommit with commit_sha, message, files_changed, gate_id, status ✅
+  - **Use Cases**: Documentation, small fixes, configuration, minor refactoring ✅
+  - **Acceptance**: Small changes commit directly to main with gate approval ✅
+  - **Completed**: Nov 2, 2025
 - [x] **COMPLETED**: Create GitHub Specialist agent integration with LLM capabilities
   - GitHubSpecialistAgent inherits from BaseAgent with LLM client ✅
   - System prompt for GitHub expertise ✅
   - TAS integration for permission-based tool access ✅
   - **Completed**: Nov 2, 2025
-- [ ] **TODO**: Add LLM-generated commit message and PR description optimization
-  - **Status**: Deferred to Phase 3+ (LLM prompt engineering)
-- [ ] **TODO**: Build automated code review integration with AI analysis
-  - **Status**: Deferred to Phase 3+ (advanced features)
+- [x] **COMPLETED**: Add LLM-generated commit message and PR description optimization
+  - **File**: `backend/services/commit_message_generator.py` ✅ (260 lines)
+  - **File**: `backend/services/pr_description_generator.py` ✅ (270 lines)
+  - **Features**: ✅
+    - Conventional commits format (type, scope, subject)
+    - 11 commit types (feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert)
+    - Automatic scope detection from file paths
+    - PR description with summary, changes, testing notes, checklist
+    - Breaking change detection
+    - Related issue extraction
+  - **Commit Types**: Determined from diff analysis (tests, docs, fixes, performance, etc.) ✅
+  - **PR Sections**: Summary, Changes, Breaking Changes, Testing, Related Issues, Checklist ✅
+  - **Validation**: Conventional commit format validation ✅
+  - **Acceptance**: Generates semantic commit messages and comprehensive PR descriptions ✅
+  - **Completed**: Nov 2, 2025
+
+- [x] **COMPLETED**: Build automated code review integration with AI analysis
+  - **File**: `backend/services/github_pr_integration.py` ✅ (305 lines)
+  - **Integrates**: CodeReviewer + PRDescriptionGenerator + CommitMessageGenerator ✅
+  - **Features**: ✅
+    - `review_pr()` - Reviews PR and posts comments to GitHub
+    - `generate_pr_description()` - Generates description from commits and diff
+    - `suggest_commit_message()` - Suggests conventional commit message
+  - **GitHub API**: GET PR details, diff, commits, files; POST review comments ✅
+  - **Auto-posting**: Optional automatic comment posting ✅
+  - **PRReviewResult**: Includes pr_number, review_posted, comment_url, issues_found, quality_score ✅
+  - **Uses**: Phase 3.3 CodeReviewer service for analysis ✅
+  - **Acceptance**: Posts AI code reviews to GitHub PRs automatically ✅
+  - **Completed**: Nov 2, 2025
 
 ### 2.4.1 GitHub Specialist Agent (Decision 77)
 **Reference**: `docs/architecture/decision-77-github-specialist-agent.md`
