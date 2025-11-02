@@ -37,9 +37,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan
     )
 
+    # CORS configuration - Allow network access
+    # Using regex to allow local network IPs (192.168.x.x, 10.x.x.x)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://localhost:5173"],  # Vite default
+        allow_origin_regex=r"http://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+):(3000|5173|80)",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

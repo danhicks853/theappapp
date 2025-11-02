@@ -44,7 +44,7 @@ services:
       OPENAI_MODEL: gpt-4-turbo-mini
       PYTHONPATH: /app
     ports:
-      - "8000:8000"
+      - "0.0.0.0:8000:8000"  # Bind to all interfaces for network access
     depends_on:
       postgres:
         condition: service_healthy
