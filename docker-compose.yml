@@ -64,7 +64,7 @@ services:
         VITE_API_URL: http://localhost:8000
     container_name: theappapp-frontend
     ports:
-      - "3000:80"
+      - "0.0.0.0:3000:80"  # Bind to all interfaces for network access
     depends_on:
       - backend
     networks:
