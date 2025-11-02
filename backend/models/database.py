@@ -3,8 +3,7 @@ Database Models for Tool Access Service
 
 SQLAlchemy models for TAS tables.
 """
-from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, BigInteger, Text, DateTime, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, Boolean, BigInteger, Text, DateTime, UniqueConstraint, Index, LargeBinary
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
@@ -90,3 +89,30 @@ class ToolAuditLog(Base):
             "result": self.result,
             "error_message": self.error_message
         }
+
+
+class GitHubCredential(Base):
+    """GitHub OAuth credentials with encryption.
+    
+    Stores encrypted GitHub OAuth tokens for users.
+    One credential per user (enforced by unique constraint).
+    """
+    __tablename__ = 'github_credentials'
+    
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False, unique=True)
+    access_token_encrypted = Column(LargeBinary, nullable=False)
+    refresh_token_encrypted = Column(LargeBinary, nullable=True)
+    token_expiry = Column(DateTime(timezone=True), nullable=True)
+    github_username = Column(String(255), nullable=True)
+    github_user_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    
+    __table_args__ = (
+        Index('idx_github_credentials_user_id', 'user_id'),
+        Index('idx_github_credentials_github_user_id', 'github_user_id'),
+    )
+    
+    def __repr__(self):
+        return f"<GitHubCredential(user_id={self.user_id}, github_username={self.github_username})>"

@@ -278,3 +278,112 @@ class GateManager:
             else:
                 logger.warning(f"Gate not found: id={gate_id}")
                 return None
+    
+    async def handle_rejection(
+        self,
+        gate_id: str,
+        resolved_by: str,
+        feedback: str,
+        revision_count: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Handle gate rejection with resolution cycle.
+        
+        Flow:
+        1. User denies gate with feedback
+        2. Agent receives feedback
+        3. Agent revises approach (up to 3 attempts)
+        4. Agent resubmits for approval
+        5. After 3 rejections, escalate to human for manual intervention
+        
+        Args:
+            gate_id: Gate identifier
+            resolved_by: User who rejected the gate
+            feedback: Required feedback explaining rejection and suggested approach
+            revision_count: Current revision attempt count
+        
+        Returns:
+            Dict with status, next_action, and escalation info
+        """
+        logger.info(f"Handling rejection for gate: id={gate_id}, revision={revision_count}")
+        
+        MAX_REVISIONS = 3
+        
+        # Deny the gate with feedback
+        denied = await self.deny_gate(gate_id, resolved_by, feedback)
+        
+        if not denied:
+            logger.error(f"Failed to deny gate: {gate_id}")
+            return {
+                "success": False,
+                "error": "Failed to deny gate"
+            }
+        
+        # Check revision count
+        if revision_count >= MAX_REVISIONS:
+            logger.warning(f"Max revisions reached for gate: {gate_id}, escalating")
+            
+            # Create escalation gate
+            gate = await self.get_gate(gate_id)
+            if gate:
+                escalation_gate_id = await self.create_gate(
+                    project_id=gate["project_id"],
+                    agent_id=gate["agent_id"],
+                    gate_type="manual",
+                    reason=f"Agent failed after {MAX_REVISIONS} revision attempts. Manual intervention required.",
+                    context={
+                        "original_gate_id": gate_id,
+                        "revision_attempts": revision_count,
+                        "last_feedback": feedback,
+                        "escalation": True
+                    }
+                )
+                
+                return {
+                    "success": True,
+                    "status": "escalated",
+                    "next_action": "manual_intervention",
+                    "escalation_gate_id": escalation_gate_id,
+                    "message": f"Max revisions ({MAX_REVISIONS}) reached. Created escalation gate for manual review."
+                }
+        
+        # Return feedback to agent for revision
+        return {
+            "success": True,
+            "status": "rejected",
+            "next_action": "revise_and_resubmit",
+            "feedback": feedback,
+            "revision_count": revision_count + 1,
+            "remaining_attempts": MAX_REVISIONS - revision_count - 1,
+            "message": f"Gate rejected. Agent should revise approach based on feedback. {MAX_REVISIONS - revision_count - 1} attempts remaining."
+        }
+    
+    async def get_rejection_history(self, gate_id: str) -> List[Dict[str, Any]]:
+        """
+        Get rejection history for a gate to track revision cycles.
+        
+        Args:
+            gate_id: Gate identifier
+        
+        Returns:
+            List of rejection events with feedback
+        """
+        # Note: This would require a separate gate_history table to track all rejections
+        # For now, we just return the current gate's feedback if denied
+        gate = await self.get_gate(gate_id)
+        
+        if not gate:
+            return []
+        
+        if gate["status"] == "denied" and gate["feedback"]:
+            return [
+                {
+                    "gate_id": gate["id"],
+                    "resolved_at": gate["resolved_at"],
+                    "resolved_by": gate["resolved_by"],
+                    "feedback": gate["feedback"],
+                    "status": gate["status"]
+                }
+            ]
+        
+        return []

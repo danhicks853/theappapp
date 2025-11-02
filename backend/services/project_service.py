@@ -260,6 +260,98 @@ class ProjectService:
         
         return specialist_ids
     
+    def pause_project(self, project_id: str, db: Connection) -> Optional[Project]:
+        """
+        Pause a project - stops all active agents and saves state.
+        
+        Args:
+            project_id: Project ID
+            db: Database session
+        
+        Returns:
+            Updated project with status 'paused' or None if not found
+        """
+        logger.info(f"Pausing project: {project_id}")
+        
+        # Update project status to paused
+        query = text("""
+            UPDATE projects
+            SET status = 'paused', updated_at = NOW()
+            WHERE id = :id AND status = 'active'
+            RETURNING id, name, description, status, created_at, updated_at
+        """)
+        
+        result = db.execute(query, {"id": project_id})
+        db.commit()
+        
+        row = result.first()
+        if not row:
+            logger.warning(f"Project not found or not active: {project_id}")
+            return None
+        
+        # Get specialists
+        specialists_query = text("""
+            SELECT specialist_id
+            FROM project_specialists
+            WHERE project_id = :project_id
+        """)
+        
+        specialists_result = db.execute(specialists_query, {"project_id": project_id})
+        specialist_ids = [str(r[0]) for r in specialists_result.fetchall()]
+        
+        # TODO: Stop active agents for this project
+        # This would integrate with the orchestrator to gracefully stop agents
+        # For now, we just update the status
+        
+        logger.info(f"Project paused: {project_id}")
+        return self._row_to_project(row, specialist_ids)
+    
+    def resume_project(self, project_id: str, db: Connection) -> Optional[Project]:
+        """
+        Resume a paused project - restarts agents from saved state.
+        
+        Args:
+            project_id: Project ID
+            db: Database session
+        
+        Returns:
+            Updated project with status 'active' or None if not found
+        """
+        logger.info(f"Resuming project: {project_id}")
+        
+        # Update project status to active
+        query = text("""
+            UPDATE projects
+            SET status = 'active', updated_at = NOW()
+            WHERE id = :id AND status = 'paused'
+            RETURNING id, name, description, status, created_at, updated_at
+        """)
+        
+        result = db.execute(query, {"id": project_id})
+        db.commit()
+        
+        row = result.first()
+        if not row:
+            logger.warning(f"Project not found or not paused: {project_id}")
+            return None
+        
+        # Get specialists
+        specialists_query = text("""
+            SELECT specialist_id
+            FROM project_specialists
+            WHERE project_id = :project_id
+        """)
+        
+        specialists_result = db.execute(specialists_query, {"project_id": project_id})
+        specialist_ids = [str(r[0]) for r in specialists_result.fetchall()]
+        
+        # TODO: Restart agents for this project
+        # This would integrate with the orchestrator to restart agents from saved state
+        # For now, we just update the status
+        
+        logger.info(f"Project resumed: {project_id}")
+        return self._row_to_project(row, specialist_ids)
+    
     def _row_to_project(self, row, specialist_ids: List[str]) -> Project:
         """Convert database row to Project object."""
         return Project(

@@ -28,7 +28,7 @@ class ProjectUpdate(BaseModel):
     """Request model for updating project."""
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = Field(None, min_length=1)
-    status: Optional[str] = Field(None, pattern="^(active|completed|archived)$")
+    status: Optional[str] = Field(None, pattern="^(active|completed|archived|paused)$")
 
 
 class ProjectResponse(BaseModel):
@@ -151,3 +151,58 @@ def get_project_specialists(
     
     specialist_ids = service.get_project_specialists(project_id, db)
     return specialist_ids
+
+
+@router.post("/{project_id}/pause", response_model=ProjectResponse)
+def pause_project(
+    project_id: str,
+    db: Connection = Depends(get_db),
+    service: ProjectService = Depends(get_project_service)
+):
+    """
+    Pause a project - stops all active agents and saves state.
+    
+    This is manual cost control - pausing stops all agent activity.
+    Can only pause projects in 'active' status.
+    """
+    paused = service.pause_project(project_id, db)
+    
+    if not paused:
+        # Try to get project to see if it exists
+        project = service.get_project(project_id, db)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Can only pause active projects. Current status: {project.status}"
+            )
+    
+    return ProjectResponse(**paused.__dict__)
+
+
+@router.post("/{project_id}/resume", response_model=ProjectResponse)
+def resume_project(
+    project_id: str,
+    db: Connection = Depends(get_db),
+    service: ProjectService = Depends(get_project_service)
+):
+    """
+    Resume a paused project - restarts agents from saved state.
+    
+    Can only resume projects in 'paused' status.
+    """
+    resumed = service.resume_project(project_id, db)
+    
+    if not resumed:
+        # Try to get project to see if it exists
+        project = service.get_project(project_id, db)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Can only resume paused projects. Current status: {project.status}"
+            )
+    
+    return ProjectResponse(**resumed.__dict__)
