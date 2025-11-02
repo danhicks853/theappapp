@@ -17,7 +17,6 @@ import logging
 from typing import List, Optional, Dict, Any
 from enum import Enum
 from dataclasses import dataclass
-from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
