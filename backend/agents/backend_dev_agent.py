@@ -85,3 +85,26 @@ class BackendDevAgent(BaseAgent):
             system_prompt=BACKEND_DEV_SYSTEM_PROMPT,
             **kwargs
         )
+    
+    async def _execute_internal_action(self, action: Any, state: Any, attempt: int):
+        """
+        Execute action directly (without tools).
+        
+        For backend dev, this means writing code, analyzing requirements, etc.
+        MVP: Return action description as output (simulates work being done)
+        """
+        from backend.models.agent_state import Result
+        
+        # Simulate successful execution
+        # In production, this would actually write files, run code, etc.
+        return Result(
+            success=True,
+            output={
+                "action": action.description,
+                "operation": action.operation,
+                "result": f"Completed: {action.description}"
+            },
+            error=None,
+            metadata={"attempt": attempt},
+            attempt=attempt
+        )
