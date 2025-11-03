@@ -8,12 +8,14 @@ LABEL purpose="code-execution-sandbox"
 LABEL language="go"
 LABEL version="1.21"
 
-# Install common tools
+# Install common tools and Python (for TAS file operations)
 RUN apk add --no-cache \
     git \
     curl \
     wget \
-    make
+    make \
+    python3 \
+    py3-pip
 
 WORKDIR /workspace
 

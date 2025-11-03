@@ -8,13 +8,15 @@ LABEL purpose="code-execution-sandbox"
 LABEL language="php"
 LABEL version="8.2"
 
-# Install common tools and extensions
+# Install common tools, extensions, and Python (for TAS file operations)
 RUN apt-get update && apt-get install -y \
     git \
     curl \
     wget \
     zip \
     unzip \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Composer

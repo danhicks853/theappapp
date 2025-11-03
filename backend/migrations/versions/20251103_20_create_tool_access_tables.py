@@ -1,7 +1,7 @@
 """Create tool access tables
 
 Revision ID: 20251103_20
-Revises: 20251103_19
+Revises: 20251103_18
 Create Date: 2025-11-03
 
 Creates tables for Tool Access Service (TAS):
@@ -14,7 +14,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = '20251103_20'
-down_revision = '20251103_19'
+down_revision = '20251103_18'
 branch_labels = None
 depends_on = None
 

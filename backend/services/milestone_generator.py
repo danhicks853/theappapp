@@ -296,13 +296,12 @@ class MilestoneGenerator:
             generated_at=datetime.utcnow().isoformat()
         )
         
-        # Store plan
+        # Store in database
         await self._store_project_plan(plan)
         
-        logger.info(
-            f"Project plan generated: {len(phases)} phases, "
-            f"{total_days} days, complexity={complexity:.2f}"
-        )
+        # Count total milestones across all phases
+        total_milestones = sum(len(phase.milestones) for phase in plan.phases)
+        logger.info(f"Generated project plan: {total_milestones} milestones across {len(plan.phases)} phases, {plan.total_estimated_days} days")
         
         return plan
     
@@ -440,11 +439,13 @@ class MilestoneGenerator:
     
     async def _store_milestone(self, project_id: str, milestone: Milestone) -> None:
         """Store a milestone in database."""
+        import json
+        
         query = text("""
             INSERT INTO milestones
             (id, project_id, phase_name, name, description, tasks,
              estimated_days, dependencies, deliverables, created_at, updated_at)
-            VALUES (:id, :project_id, :phase_name, :name, :description, :tasks::jsonb,
+            VALUES (:id, :project_id, :phase_name, :name, :description, :tasks,
                     :estimated_days, :dependencies, :deliverables, NOW(), NOW())
             ON CONFLICT (id) DO UPDATE
             SET name = EXCLUDED.name,
@@ -463,10 +464,10 @@ class MilestoneGenerator:
                 "phase_name": milestone.phase_name,
                 "name": milestone.name,
                 "description": milestone.description,
-                "tasks": milestone.tasks,
+                "tasks": json.dumps(milestone.tasks) if milestone.tasks else "[]",
                 "estimated_days": milestone.estimated_days,
-                "dependencies": milestone.dependencies,
-                "deliverables": milestone.deliverables
+                "dependencies": json.dumps(milestone.dependencies) if milestone.dependencies else "[]",
+                "deliverables": json.dumps(milestone.deliverables) if milestone.deliverables else "[]"
             })
             conn.commit()
     

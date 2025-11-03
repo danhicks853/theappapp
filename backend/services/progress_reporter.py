@@ -391,13 +391,15 @@ class ProgressReporter:
     
     async def _store_report(self, report: Report) -> None:
         """Store report in database."""
+        import json
+        
         query = text("""
             INSERT INTO progress_reports
             (id, project_id, report_type, title, summary, completed_tasks,
              pending_tasks, blockers, test_coverage, next_steps, timeline_status,
              generated_at, period_start, period_end, created_at)
-            VALUES (:id, :project_id, :report_type, :title, :summary, :completed_tasks::jsonb,
-                    :pending_tasks::jsonb, :blockers::jsonb, :test_coverage, :next_steps::jsonb,
+            VALUES (:id, :project_id, :report_type, :title, :summary, :completed_tasks,
+                    :pending_tasks, :blockers, :test_coverage, :next_steps,
                     :timeline_status, :generated_at, :period_start, :period_end, NOW())
         """)
         
@@ -408,11 +410,11 @@ class ProgressReporter:
                 "report_type": report.report_type,
                 "title": report.title,
                 "summary": report.summary,
-                "completed_tasks": report.completed_tasks,
-                "pending_tasks": report.pending_tasks,
-                "blockers": report.blockers,
+                "completed_tasks": json.dumps(report.completed_tasks) if report.completed_tasks else None,
+                "pending_tasks": json.dumps(report.pending_tasks) if report.pending_tasks else None,
+                "blockers": json.dumps(report.blockers) if report.blockers else None,
                 "test_coverage": report.test_coverage,
-                "next_steps": report.next_steps,
+                "next_steps": json.dumps(report.next_steps) if report.next_steps else None,
                 "timeline_status": report.timeline_status,
                 "generated_at": report.generated_at,
                 "period_start": report.period_start,

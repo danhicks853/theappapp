@@ -56,7 +56,11 @@ def run_migrations_online() -> None:
     if configuration is None:
         raise RuntimeError("Alembic configuration section missing")
 
-    if not configuration.get("sqlalchemy.url"):
+    # Always check for DATABASE_URL environment variable first
+    env_url = os.getenv("DATABASE_URL")
+    if env_url:
+        configuration["sqlalchemy.url"] = env_url
+    elif not configuration.get("sqlalchemy.url"):
         configuration["sqlalchemy.url"] = _database_url_from_env()
 
     connectable = engine_from_config(

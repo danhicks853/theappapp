@@ -12,6 +12,7 @@ from sqlalchemy.engine import Connection
 
 from backend.api.dependencies import get_db
 from backend.services.project_service import ProjectService
+from backend.services.project_build_service import ProjectBuildService, BuildProgress
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
@@ -42,10 +43,44 @@ class ProjectResponse(BaseModel):
     specialist_ids: List[str]
 
 
+class BuildRequest(BaseModel):
+    """Request model for starting a build."""
+    description: str = Field(..., min_length=10, description="What to build")
+    tech_stack: dict = Field(default_factory=dict, description="Technology choices")
+    auto_approve_gates: bool = Field(default=False, description="Auto-approve gates")
+
+
+class BuildResponse(BaseModel):
+    """Response model for build initiation."""
+    project_id: str
+    status: str
+    stream_url: Optional[str] = None
+    message: str
+
+
+class BuildStatusResponse(BaseModel):
+    """Response model for build status."""
+    project_id: str
+    status: str
+    current_phase: str
+    progress_percent: float
+    active_agent: Optional[str]
+    last_event: Optional[str]
+    started_at: str
+    updated_at: str
+
+
 # Dependency to get project service
 def get_project_service():
     """Get project service."""
     return ProjectService()
+
+
+# Dependency to get build service
+def get_build_service():
+    """Get project build service."""
+    # TODO: Inject actual db_engine and llm_client
+    return None  # Placeholder - needs proper initialization
 
 
 @router.post("", response_model=ProjectResponse, status_code=201)
@@ -206,3 +241,144 @@ def resume_project(
             )
     
     return ProjectResponse(**resumed.__dict__)
+
+
+# ============================================================================
+# NEW: AI-Powered Build Endpoints
+# ============================================================================
+
+@router.post("/build", response_model=BuildResponse, status_code=202)
+async def start_build(
+    request: BuildRequest,
+    build_service: ProjectBuildService = Depends(get_build_service)
+):
+    """
+    Start an AI-powered project build.
+    
+    This endpoint initiates the full autonomous build process:
+    1. Generates project plan with milestones
+    2. Creates orchestrator and registers agents
+    3. Begins building code, tests, and deployment configs
+    4. Streams progress via events
+    
+    Returns immediately with project_id - build continues asynchronously.
+    Monitor progress via GET /projects/{project_id}/build/status or WebSocket.
+    
+    **Example Request:**
+    ```json
+    {
+        "description": "Build a todo list app with React frontend and FastAPI backend",
+        "tech_stack": {
+            "frontend": "react",
+            "backend": "fastapi",
+            "database": "postgresql"
+        },
+        "auto_approve_gates": false
+    }
+    ```
+    """
+    if not build_service:
+        raise HTTPException(
+            status_code=503,
+            detail="Build service not initialized - contact administrator"
+        )
+    
+    try:
+        # Start the build
+        project_id = await build_service.start_build(
+            description=request.description,
+            tech_stack=request.tech_stack,
+            auto_approve_gates=request.auto_approve_gates
+        )
+        
+        # Return build initiation response
+        return BuildResponse(
+            project_id=project_id,
+            status="initializing",
+            stream_url=f"ws://localhost:8000/ws/builds/{project_id}",
+            message="Build started. Monitor progress via WebSocket or status endpoint."
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start build: {str(e)}")
+
+
+@router.get("/{project_id}/build/status", response_model=BuildStatusResponse)
+async def get_build_status(
+    project_id: str,
+    build_service: ProjectBuildService = Depends(get_build_service)
+):
+    """
+    Get current build status and progress.
+    
+    Returns real-time information about:
+    - Current phase (planning, implementation, testing, deployment)
+    - Progress percentage
+    - Active agent
+    - Last event
+    
+    Poll this endpoint or use WebSocket for real-time updates.
+    """
+    if not build_service:
+        raise HTTPException(
+            status_code=503,
+            detail="Build service not initialized"
+        )
+    
+    try:
+        progress = await build_service.get_build_status(project_id)
+        
+        return BuildStatusResponse(
+            project_id=progress.project_id,
+            status=progress.status,
+            current_phase=progress.current_phase,
+            progress_percent=progress.progress_percent,
+            active_agent=progress.active_agent,
+            last_event=progress.last_event,
+            started_at=progress.started_at,
+            updated_at=progress.updated_at
+        )
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{project_id}/build/pause", status_code=204)
+async def pause_build(
+    project_id: str,
+    build_service: ProjectBuildService = Depends(get_build_service)
+):
+    """
+    Pause an active build.
+    
+    Pauses all agent activity and saves state.
+    Resume with POST /{project_id}/build/resume
+    """
+    if not build_service:
+        raise HTTPException(status_code=503, detail="Build service not initialized")
+    
+    success = await build_service.pause_build(project_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Build not found or not active")
+
+
+@router.post("/{project_id}/build/cancel", status_code=204)
+async def cancel_build(
+    project_id: str,
+    reason: Optional[str] = None,
+    build_service: ProjectBuildService = Depends(get_build_service)
+):
+    """
+    Cancel an active build.
+    
+    Stops all agents, cleans up resources, and marks build as cancelled.
+    Cannot be resumed after cancellation.
+    """
+    if not build_service:
+        raise HTTPException(status_code=503, detail="Build service not initialized")
+    
+    success = await build_service.cancel_build(project_id, reason or "User cancelled")
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Build not found")

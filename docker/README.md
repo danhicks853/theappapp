@@ -17,7 +17,14 @@ This sandbox system allows AI agents to safely execute code in isolated Docker c
 - **.NET 8.0** - Full SDK with C# support
 - **PowerShell 7** - Cross-platform PowerShell
 
-## Building Images
+## Current Status
+
+**Using public images temporarily**: Currently using official Docker Hub images:
+- `python:3.11-slim`, `node:20-slim`, `openjdk:17-slim`, etc.
+
+**TODO**: Build custom images with Python installed in all containers for unified file operations via TAS.
+
+## Building Custom Images (Future)
 
 Build all images at once:
 
@@ -34,6 +41,12 @@ docker build -t theappapp-python:latest -f images/python/Dockerfile images/pytho
 docker build -t theappapp-node:latest -f images/node/Dockerfile images/node/
 # ... etc
 ```
+
+**Custom Images Will Include**:
+- Base language runtime (Node, Java, Go, etc.)
+- Python 3.11+ for TAS file operations
+- Common development tools
+- Pre-configured `/workspace` directory
 
 ## Architecture
 

@@ -66,31 +66,31 @@ PHASE_DELIVERABLES = {
     "workshopping": [
         {
             "name": "Project Requirements Document",
-            "description": "Detailed requirements specification with user stories",
+            "description": "Write comprehensive requirements.md with user stories and acceptance criteria",
             "type": DeliverableType.DOCUMENT,
             "required": True
         },
         {
             "name": "Architecture Decision Records",
-            "description": "ADRs documenting key architectural decisions",
+            "description": "Create ADRs documenting key architectural decisions and trade-offs",
             "type": DeliverableType.DOCUMENT,
             "required": True
         },
         {
             "name": "System Architecture Diagram",
-            "description": "High-level system architecture visualization",
+            "description": "Design and document high-level system architecture with component diagrams",
             "type": DeliverableType.DIAGRAM,
             "required": True
         },
         {
             "name": "Task Breakdown",
-            "description": "Detailed task list with estimates",
+            "description": "Create detailed task list with time estimates and dependencies",
             "type": DeliverableType.DOCUMENT,
             "required": True
         },
         {
             "name": "Technology Stack Document",
-            "description": "Selected technologies with justifications",
+            "description": "Select and document technology stack choices with justifications and trade-offs",
             "type": DeliverableType.DOCUMENT,
             "required": True
         }
@@ -272,7 +272,8 @@ class DeliverableTracker:
     async def define_deliverables(
         self,
         phase_id: str,
-        phase_name: str
+        phase_name: str,
+        project_id: Optional[str] = None
     ) -> List[Deliverable]:
         """
         Define and create deliverables for a phase.
@@ -289,18 +290,24 @@ class DeliverableTracker:
         definitions = PHASE_DELIVERABLES.get(phase_name, [])
         deliverables = []
         
+        import uuid
         for defn in definitions:
+            deliverable_id = f"deliv-{uuid.uuid4()}"
+            
             query = text("""
                 INSERT INTO deliverables 
-                (phase_id, name, description, deliverable_type, status, created_at, updated_at)
-                VALUES (:phase_id, :name, :description, :type, :status, NOW(), NOW())
+                (id, project_id, phase_id, title, name, description, deliverable_type, status, created_at, updated_at)
+                VALUES (:id, :project_id, :phase_id, :title, :name, :description, :type, :status, NOW(), NOW())
                 RETURNING id, phase_id, name, description, deliverable_type, status, 
                           artifact_path, validation_result, created_at, updated_at
             """)
             
             with self.engine.connect() as conn:
                 result = conn.execute(query, {
+                    "id": deliverable_id,
+                    "project_id": project_id,
                     "phase_id": phase_id,
+                    "title": defn["name"],  # title is NOT NULL
                     "name": defn["name"],
                     "description": defn["description"],
                     "type": defn["type"].value,
@@ -346,9 +353,11 @@ class DeliverableTracker:
             validation = self._basic_validate(deliverable, artifact)
         
         # Store validation result
+        import json
+        
         query = text("""
             UPDATE deliverables
-            SET validation_result = :validation_result::jsonb,
+            SET validation_result = :validation_result,
                 status = :status,
                 updated_at = NOW()
             WHERE id = :deliverable_id
@@ -359,13 +368,13 @@ class DeliverableTracker:
         with self.engine.connect() as conn:
             conn.execute(query, {
                 "deliverable_id": deliverable_id,
-                "validation_result": {
+                "validation_result": json.dumps({
                     "valid": validation.valid,
                     "score": validation.score,
                     "feedback": validation.feedback,
                     "issues": validation.issues,
                     "suggestions": validation.suggestions
-                },
+                }),
                 "status": status.value
             })
             conn.commit()

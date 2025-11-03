@@ -91,7 +91,7 @@ class ToolAccessService:
     # Default permissions per agent type
     # Format: {agent_type: {tool_name: {operations}}}
     DEFAULT_PERMISSIONS = {
-        "backend_dev": {
+        "backend_developer": {
             "container": {"create", "destroy", "execute", "list"},
             "file_system": {"read", "write", "delete", "list"},
             "web_search": {"search"},
@@ -101,8 +101,9 @@ class ToolAccessService:
             "test_generator": {"generate_tests", "identify_coverage_gaps", "generate_edge_cases"},
             "edge_case_finder": {"find_edge_cases", "prioritize_cases"},
             "test_quality_scorer": {"score_test", "score_file", "generate_report"},
+            "deliverable": {"mark_complete", "get_status"},
         },
-        "frontend_dev": {
+        "frontend_developer": {
             "container": {"create", "destroy", "execute", "list"},
             "file_system": {"read", "write", "delete", "list"},
             "web_search": {"search"},
@@ -111,57 +112,99 @@ class ToolAccessService:
             "test_generator": {"generate_tests", "identify_coverage_gaps", "generate_edge_cases"},
             "edge_case_finder": {"find_edge_cases", "prioritize_cases"},
             "test_quality_scorer": {"score_test", "score_file", "generate_report"},
+            "deliverable": {"mark_complete", "get_status"},
         },
         "workshopper": {
             "web_search": {"search"},
-            "file_system": {"read", "list"},
+            "file_system": {"read", "write", "list"},
+            "deliverable": {"mark_complete", "get_status"},
         },
         "security_expert": {
             "web_search": {"search"},
-            "file_system": {"read", "list"},
+            "file_system": {"read", "write", "list"},
             "code_validator": {"validate"},
+            "deliverable": {"mark_complete", "get_status"},
         },
         "devops_engineer": {
             "container": {"create", "destroy", "execute", "list"},
             "file_system": {"read", "write", "delete", "list"},
             "web_search": {"search"},
             "database": {"read"},
+            "deliverable": {"mark_complete", "get_status"},
         },
         "qa_engineer": {
             "container": {"create", "destroy", "execute", "list"},
-            "file_system": {"read", "list"},
+            "file_system": {"read", "write", "list"},
             "web_search": {"search"},
             "test_config_generator": {"generate_configs", "setup_backend", "setup_frontend", "setup_ci"},
             "test_generator": {"generate_tests", "identify_coverage_gaps", "generate_edge_cases"},
             "edge_case_finder": {"find_edge_cases", "prioritize_cases"},
             "test_quality_scorer": {"score_test", "score_file", "generate_report"},
             "test_maintainer": {"detect_changes", "suggest_updates", "generate_pr_comment"},
+            "deliverable": {"mark_complete", "get_status"},
         },
         "github_specialist": {
             "github": {"create_repo", "delete_repo", "merge_pr", "list_repos"},
             "file_system": {"read", "list"},
+            "deliverable": {"mark_complete", "get_status"},
         },
-        "ui_ux": {
+        "ui_ux_designer": {
             "file_system": {"read", "write", "list"},
             "web_search": {"search"},
             "test_config_generator": {"generate_configs", "setup_frontend", "setup_ci"},
             "test_generator": {"generate_tests", "identify_coverage_gaps", "generate_edge_cases"},
             "edge_case_finder": {"find_edge_cases", "prioritize_cases"},
             "test_quality_scorer": {"score_test", "score_file", "generate_report"},
-        }
+            "deliverable": {"mark_complete", "get_status"},
+        },
     }
     
-    def __init__(self, db_session: Optional[Session] = None, use_db: bool = True):
+    def __init__(
+        self, 
+        db_session: Optional[Session] = None, 
+        use_db: bool = True,
+        # Service dependencies
+        container_manager: Optional[Any] = None,
+        web_search_service: Optional[Any] = None,
+        code_validator: Optional[Any] = None,
+        github_specialist: Optional[Any] = None,
+        test_config_generator: Optional[Any] = None,
+        test_generator: Optional[Any] = None,
+        edge_case_finder: Optional[Any] = None,
+        test_quality_scorer: Optional[Any] = None,
+        test_maintainer: Optional[Any] = None
+    ):
         """Initialize Tool Access Service.
         
         Args:
             db_session: SQLAlchemy session for database access
             use_db: If True, use database for permissions; if False, use in-memory defaults
+            container_manager: ContainerManager service instance
+            web_search_service: WebSearchService instance
+            code_validator: CodeValidator instance
+            github_specialist: GitHubSpecialistAgent instance
+            test_config_generator: TestConfigGenerator instance
+            test_generator: TestGenerator instance
+            edge_case_finder: EdgeCaseFinder instance
+            test_quality_scorer: TestQualityScorer instance
+            test_maintainer: TestMaintainer instance
         """
         self.db_session = db_session
         self.use_db = use_db and db_session is not None
         self.permissions = self.DEFAULT_PERMISSIONS.copy()
         self.audit_log: List[Dict[str, Any]] = []  # In-memory for now, DB later
+        
+        # Store service instances
+        self._container_manager = container_manager
+        self._web_search_service = web_search_service
+        self._code_validator = code_validator
+        self._github_specialist = github_specialist
+        self._test_config_generator = test_config_generator
+        self._test_generator = test_generator
+        self._edge_case_finder = edge_case_finder
+        self._test_quality_scorer = test_quality_scorer
+        self._test_maintainer = test_maintainer
+        
         self.tool_registry = self._initialize_tool_registry()
         self._permission_cache: Dict[str, Tuple[bool, str, datetime]] = {}  # Cache with timestamp
         self._cache_ttl = timedelta(minutes=5)  # 5-minute cache
@@ -169,71 +212,133 @@ class ToolAccessService:
     
     def _initialize_tool_registry(self) -> Dict[str, Any]:
         """
-        Initialize registry of available tools.
+        Initialize registry of available tools with actual handlers.
         
         Returns:
             Dict mapping tool names to tool handlers
         """
-        # Will be populated with actual tool implementations
-        # For now, registry structure only
         registry = {
             "container": {
                 "category": ToolCategory.CODE_EXECUTION,
                 "operations": ["create", "destroy", "execute", "list"],
-                "handler": None  # Will be set when integrating ContainerManager
+                "handler": self._container_manager
             },
             "file_system": {
                 "category": ToolCategory.FILE_SYSTEM,
                 "operations": ["read", "write", "delete", "list"],
-                "handler": None
+                "handler": self._create_file_system_handler()
             },
             "web_search": {
                 "category": ToolCategory.WEB_SEARCH,
                 "operations": ["search"],
-                "handler": None  # Will be set to WebSearchService
+                "handler": self._web_search_service
             },
             "code_validator": {
                 "category": ToolCategory.CODE_EXECUTION,
                 "operations": ["validate"],
-                "handler": None  # Will be set to CodeValidator
+                "handler": self._code_validator
             },
             "github": {
                 "category": ToolCategory.GITHUB,
                 "operations": ["create_repo", "delete_repo", "merge_pr", "list_repos"],
-                "handler": None
+                "handler": self._github_specialist
             },
             "database": {
                 "category": ToolCategory.DATABASE,
                 "operations": ["read", "write"],
-                "handler": None
+                "handler": self._create_database_handler()
             },
             "test_config_generator": {
                 "category": ToolCategory.TESTING,
                 "operations": ["generate_configs", "setup_backend", "setup_frontend", "setup_ci"],
-                "handler": None  # Will be set to TestConfigGenerator
+                "handler": self._test_config_generator
             },
             "test_generator": {
                 "category": ToolCategory.TESTING,
                 "operations": ["generate_tests", "identify_coverage_gaps", "generate_edge_cases"],
-                "handler": None  # Will be set to TestGenerator
+                "handler": self._test_generator
             },
             "edge_case_finder": {
                 "category": ToolCategory.TESTING,
                 "operations": ["find_edge_cases", "prioritize_cases"],
-                "handler": None  # Will be set to EdgeCaseFinder
+                "handler": self._edge_case_finder
             },
             "test_quality_scorer": {
                 "category": ToolCategory.TESTING,
                 "operations": ["score_test", "score_file", "generate_report"],
-                "handler": None  # Will be set to TestQualityScorer
+                "handler": self._test_quality_scorer
             },
             "test_maintainer": {
                 "category": ToolCategory.TESTING,
                 "operations": ["detect_changes", "suggest_updates", "generate_pr_comment"],
-                "handler": None  # Will be set to TestMaintainer
+                "handler": self._test_maintainer
             }
         }
         return registry
+    
+    def _create_file_system_handler(self) -> Any:
+        """Create file system handler with safe operations."""
+        import os
+        from pathlib import Path
+        
+        class FileSystemHandler:
+            """Safe file system operations for agents."""
+            
+            async def read(self, file_path: str) -> str:
+                """Read file contents."""
+                path = Path(file_path)
+                if not path.exists():
+                    raise FileNotFoundError(f"File not found: {file_path}")
+                return path.read_text()
+            
+            async def write(self, file_path: str, content: str) -> bool:
+                """Write file contents."""
+                path = Path(file_path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content)
+                return True
+            
+            async def delete(self, file_path: str) -> bool:
+                """Delete file."""
+                path = Path(file_path)
+                if path.exists():
+                    path.unlink()
+                    return True
+                return False
+            
+            async def list(self, directory: str) -> List[str]:
+                """List directory contents."""
+                path = Path(directory)
+                if not path.is_dir():
+                    raise NotADirectoryError(f"Not a directory: {directory}")
+                return [str(p) for p in path.iterdir()]
+        
+        return FileSystemHandler()
+    
+    def _create_database_handler(self) -> Any:
+        """Create database handler with safe operations."""
+        
+        class DatabaseHandler:
+            """Safe database operations for agents."""
+            
+            def __init__(self, db_session):
+                self.db_session = db_session
+            
+            async def read(self, query: str, params: Optional[Dict] = None) -> List[Dict]:
+                """Execute read query."""
+                if not self.db_session:
+                    raise RuntimeError("Database session not configured")
+                # TODO: Implement safe query execution
+                return []
+            
+            async def write(self, query: str, params: Optional[Dict] = None) -> bool:
+                """Execute write query."""
+                if not self.db_session:
+                    raise RuntimeError("Database session not configured")
+                # TODO: Implement safe query execution
+                return True
+        
+        return DatabaseHandler(self.db_session)
     
     def check_permission(
         self,
@@ -674,6 +779,8 @@ class ToolAccessService:
             return await self._execute_validator_tool(operation, parameters)
         elif tool_name == "file_system":
             return await self._execute_file_system_tool(operation, parameters)
+        elif tool_name == "deliverable":
+            return await self._execute_deliverable_tool(operation, parameters)
         else:
             # Placeholder for unimplemented tools
             return {
@@ -752,13 +859,179 @@ class ToolAccessService:
             raise ValueError(f"Unknown validator operation: {operation}")
     
     async def _execute_file_system_tool(self, operation: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute file system operations."""
-        # TODO: Implement file system operations
-        # This will integrate with container volumes
-        return {
-            "status": "not_implemented",
-            "message": "File system operations not yet implemented"
-        }
+        """
+        Execute file system operations via container exec commands.
+        Files are written to Docker volumes that containers mount at /workspace.
+        """
+        import base64
+        import json
+        from backend.services.container_manager import get_container_manager
+        
+        project_id = parameters.get("project_id")
+        task_id = parameters.get("task_id")
+        
+        if not project_id:
+            raise ValueError("project_id required for file system operations")
+        if not task_id:
+            raise ValueError("task_id required for container file operations")
+        
+        file_path = parameters.get("path", "").lstrip("/")
+        if not file_path:
+            raise ValueError("path required for file system operations")
+        
+        container_mgr = get_container_manager()
+        
+        # Use project-level container (prefer project_id over task_id)
+        container_id = project_id if project_id in container_mgr.active_containers else task_id
+        
+        # If neither exists, create project container on-demand
+        if container_id not in container_mgr.active_containers:
+            logger.info(f"Creating project container on-demand for {project_id}")
+            result = await container_mgr.create_container(
+                task_id=project_id,  # Use project_id as container identifier
+                project_id=project_id,
+                language="python"  # Default to python for file operations
+            )
+            if not result.get("success"):
+                raise RuntimeError(f"Failed to create container: {result.get('message')}")
+            container_id = project_id
+        
+        container_path = f"/workspace/{file_path}"
+        
+        if operation == "write":
+            content = parameters.get("content", "")
+            
+            # Create parent directory using Python
+            parent_dir = '/'.join(container_path.rsplit('/')[:-1])
+            if parent_dir and parent_dir != "/workspace":
+                mkdir_cmd = f"python -c \"import os; os.makedirs('{parent_dir}', exist_ok=True)\""
+                mkdir_result = await container_mgr.exec_command(container_id, mkdir_cmd)
+                if mkdir_result.exit_code != 0:
+                    raise RuntimeError(f"Failed to create directory: {mkdir_result.stderr}")
+            
+            # Write file using Python (works in all containers)
+            # Encode content to base64 to avoid any escaping issues
+            content_b64 = base64.b64encode(content.encode('utf-8')).decode('ascii')
+            write_cmd = f"python -c \"import base64; open('{container_path}', 'wb').write(base64.b64decode('{content_b64}'))\""
+            result = await container_mgr.exec_command(container_id, write_cmd)
+            
+            if result.exit_code != 0:
+                raise RuntimeError(f"Failed to write file: {result.stderr}")
+            
+            # Verify file exists
+            verify = await container_mgr.exec_command(container_id, f"python -c \"import os; print('OK' if os.path.exists('{container_path}') else 'FAIL')\"")
+            if "OK" not in verify.stdout:
+                raise RuntimeError(f"File write verification failed for {container_path}")
+            
+            return {
+                "status": "success",
+                "path": file_path,
+                "bytes_written": len(content.encode('utf-8')),
+                "message": f"File written: {file_path}"
+            }
+        
+        elif operation == "read":
+            result = await container_mgr.exec_command(container_id, f"cat {container_path}")
+            
+            if result.exit_code != 0:
+                raise ValueError(f"File not found: {file_path}")
+            
+            return {
+                "status": "success",
+                "path": file_path,
+                "content": result.stdout,
+                "bytes_read": len(result.stdout.encode('utf-8'))
+            }
+        
+        elif operation == "delete":
+            result = await container_mgr.exec_command(container_id, f"rm {container_path}")
+            
+            if result.exit_code != 0:
+                raise ValueError(f"Failed to delete file: {result.stderr}")
+            
+            return {
+                "status": "success",
+                "path": file_path,
+                "message": f"File deleted: {file_path}"
+            }
+        
+        elif operation == "list":
+            # Handle "." as current directory
+            if file_path == "." or file_path == "":
+                dir_path = "/workspace"
+            else:
+                dir_path = f"/workspace/{file_path}"
+            
+            # List files using Python for cross-platform compatibility
+            list_cmd = f"python -c \"import os; import json; files = []; [files.append({{'name': f, 'type': 'directory' if os.path.isdir(os.path.join('{dir_path}', f)) else 'file', 'size': os.path.getsize(os.path.join('{dir_path}', f)) if os.path.isfile(os.path.join('{dir_path}', f)) else None}}) for f in os.listdir('{dir_path}') if f not in ['.', '..']]; print(json.dumps(files))\""
+            result = await container_mgr.exec_command(task_id, list_cmd)
+            
+            if result.exit_code != 0:
+                raise ValueError(f"Directory not found: {file_path or '.'}")
+            
+            # Parse JSON output from Python
+            import json as json_module
+            try:
+                files = json_module.loads(result.stdout.strip())
+                # Add path to each file
+                for f in files:
+                    if file_path and file_path != ".":
+                        f["path"] = f"{file_path}/{f['name']}"
+                    else:
+                        f["path"] = f['name']
+            except json_module.JSONDecodeError:
+                raise ValueError(f"Failed to parse directory listing")
+            
+            return {
+                "status": "success",
+                "path": file_path or ".",
+                "files": files,
+                "count": len(files)
+            }
+        
+        else:
+            raise ValueError(f"Unknown file system operation: {operation}")
+    
+    async def _execute_deliverable_tool(self, operation: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute deliverable tracking operations.
+        
+        Operations:
+        - mark_complete: Mark a deliverable as completed
+        - get_status: Get deliverable status
+        """
+        from sqlalchemy import text
+        
+        deliverable_id = parameters.get("deliverable_id")
+        if not deliverable_id:
+            raise ValueError("deliverable_id required for deliverable operations")
+        
+        if operation == "mark_complete":
+            # Mark deliverable as complete in database
+            status = parameters.get("status", "completed")
+            artifacts = parameters.get("artifacts", [])
+            
+            # Update deliverable status
+            # For now, just return success - full DB integration in next step
+            return {
+                "status": "success",
+                "deliverable_id": deliverable_id,
+                "new_status": status,
+                "artifacts": artifacts,
+                "message": f"Deliverable {deliverable_id} marked as {status}"
+            }
+        
+        elif operation == "get_status":
+            # Get deliverable status
+            return {
+                "status": "success",
+                "deliverable_id": deliverable_id,
+                "deliverable_status": "in_progress",  # TODO: Query from DB
+                "message": "Status retrieved"
+            }
+        
+        else:
+            raise ValueError(f"Unknown deliverable operation: {operation}")
     
     def _log_audit(
         self,

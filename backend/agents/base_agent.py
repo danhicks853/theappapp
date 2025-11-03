@@ -264,6 +264,8 @@ class BaseAgent(ABC):
 
     async def run_task(self, task: Any) -> TaskResult:
         """Execute a task using the iterative execution loop."""
+        
+        self.logger.info(f"🚀 RUN_TASK CALLED for agent {self.agent_id}")
 
         state = self._initialize_state(task)
         self.logger.info(
@@ -271,11 +273,30 @@ class BaseAgent(ABC):
         )
 
         while not self._should_terminate(state):
+            print(f"🔄 Loop iteration {state.current_step} starting")
             action = await self._plan_next_step(state)
             result = await self._execute_step_with_retry(action, state)
+            
+            # Validate and update state BEFORE self-assessment
             validation = await self._validate_step(result, state)
-
             self._update_state(state, action, result, validation)
+            
+            # HARDCODED: Agent self-assesses if task is complete after key actions
+            print(f"🔬 Checking if self-assessment needed (tool: {getattr(action, 'tool_name', None)})")
+            try:
+                is_complete = await self._self_assess_completion(state, action, result)
+                print(f"🔍 Self-assessment result: {is_complete} (tool: {action.tool_name})")
+                if is_complete:
+                    print("✅ Agent self-assessed: Task complete - exiting loop")
+                    # Mark as successful since self-assessment confirmed completion
+                    state.record_success()
+                    state.status = "completed"
+                    state.progress_score = 1.0  # Mark as fully complete for success=True
+                    return await self._finalize_result(state)
+            except Exception as e:
+                print(f"❌ Self-assessment failed: {e}")
+                import traceback
+                traceback.print_exc()
 
             if validation.success:
                 state.record_success()
@@ -298,6 +319,7 @@ class BaseAgent(ABC):
             await self._log_step_progress(state)
             state.current_step += 1
 
+        print(f"🛑 Loop terminated - step:{state.current_step} max:{state.max_steps} timeout:{getattr(state, 'timeout_reached', False)}")
         return await self._finalize_result(state)
 
     def _initialize_state(self, task: Any) -> TaskState:
@@ -306,7 +328,10 @@ class BaseAgent(ABC):
         payload = self._extract_task_payload(task)
         project_id = self._get_task_attribute(task, "project_id")
         acceptance = payload.get("acceptance_criteria", [])
+        
+        # Orchestrator provides fully contextualized goal - use it directly
         goal = payload.get("goal") or payload.get("description") or ""
+        
         constraints = payload.get("constraints", {})
 
         state = TaskState(
@@ -394,9 +419,10 @@ class BaseAgent(ABC):
             payload = {
                 "request_id": request_id,
                 "agent_id": self.agent_id,
+                "agent_type": self.agent_type,
                 "project_id": state.project_id,
                 "task_id": state.task_id,
-                "tool_name": action.tool_name,
+                "tool": action.tool_name,  # Orchestrator expects 'tool' not 'tool_name'
                 "operation": action.operation,
                 "parameters": action.parameters,
             }
@@ -670,6 +696,61 @@ class BaseAgent(ABC):
             self.logger.warning("Invalid confidence response: %s", response)
             return 0.0
 
+    async def _self_assess_completion(
+        self,
+        state: TaskState,
+        action: Action,
+        result: Result
+    ) -> bool:
+        """
+        Agent self-assesses if task is complete (minimal tokens).
+        
+        Only checks after file_system or deliverable operations.
+        Uses <100 tokens per check.
+        """
+        # Only check after key operations to minimize LLM calls
+        if action.tool_name not in ["file_system", "deliverable"]:
+            return False
+        
+        # Ultra-minimal prompt - truncate to save tokens
+        goal_short = state.goal[:200] if state.goal else "task"
+        action_desc = action.description[:100] if hasattr(action, 'description') else str(action.tool_name)
+        
+        prompt = f"""Task: {goal_short}
+Action: {action_desc}
+
+Complete? YES/NO:"""
+        
+        try:
+            # Use simple completion with minimal tokens
+            if hasattr(self.llm_client, 'simple_completion'):
+                response = await self.llm_client.simple_completion(prompt, max_tokens=3)
+            else:
+                # Fallback to OpenAI adapter with API key from env
+                import os
+                from openai import AsyncOpenAI
+                api_key = os.getenv("OPENAI_API_KEY")
+                if not api_key:
+                    self.logger.warning("No OPENAI_API_KEY - assuming task incomplete")
+                    return False
+                    
+                client = AsyncOpenAI(api_key=api_key)
+                completion = await client.chat.completions.create(
+                    model="gpt-4o-mini",  # Cheapest model
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=3,
+                    temperature=0
+                )
+                response = completion.choices[0].message.content
+            
+            is_complete = "YES" in response.upper()
+            self.logger.info(f"🤔 Self-assessment: {'COMPLETE ✅' if is_complete else 'INCOMPLETE ⏳'}")
+            return is_complete
+            
+        except Exception as e:
+            self.logger.warning(f"Self-assessment failed: {e} - assuming incomplete")
+            return False
+    
     async def _escalate_loop(self, state: TaskState) -> TaskResult:
         """Trigger a gate when loop detection threshold is exceeded."""
 

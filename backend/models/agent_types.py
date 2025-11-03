@@ -18,15 +18,16 @@ class AgentCategory(str, Enum):
 
 
 # Built-in agent types (always available, cannot be removed)
+# These MUST match the AgentType enum values in orchestrator.py
 BUILT_IN_AGENTS: List[str] = [
     "orchestrator",
-    "backend_dev",
-    "frontend_dev",
+    "backend_developer",  # matches AgentType.BACKEND_DEVELOPER
+    "frontend_developer",  # matches AgentType.FRONTEND_DEVELOPER
     "qa_engineer",
     "security_expert",
     "devops_engineer",
     "documentation_expert",
-    "uiux_designer",
+    "ui_ux_designer",  # matches AgentType.UI_UX_DESIGNER
     "github_specialist",
     "workshopper",
     "project_manager",

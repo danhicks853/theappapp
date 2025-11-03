@@ -8,11 +8,13 @@ LABEL purpose="code-execution-sandbox"
 LABEL language="ruby"
 LABEL version="3.2"
 
-# Install common build tools
+# Install common build tools and Python (for TAS file operations)
 RUN apt-get update && apt-get install -y \
     git \
     curl \
     wget \
+    python3 \
+    python3-pip \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 

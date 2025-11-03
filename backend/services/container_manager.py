@@ -19,11 +19,13 @@ logger = logging.getLogger(__name__)
 
 
 # Language to Docker image mapping
+# Custom images with Python included for TAS file operations
+# Build with: cd docker && ./build-all.sh
 LANGUAGE_IMAGES = {
     "python": "theappapp-python:latest",
     "node": "theappapp-node:latest",
-    "nodejs": "theappapp-node:latest",
     "javascript": "theappapp-node:latest",
+    "typescript": "theappapp-node:latest",
     "java": "theappapp-java:latest",
     "go": "theappapp-go:latest",
     "golang": "theappapp-go:latest",
@@ -67,10 +69,18 @@ class ContainerManager:
     
     def __init__(self):
         """Initialize the ContainerManager."""
-        self.client: Optional[docker.DockerClient] = None
         self.active_containers: Dict[str, Container] = {}  # task_id -> Container
         self._initialized = False
-        logger.info("ContainerManager initialized")
+        
+        # Initialize Docker client immediately
+        try:
+            self.client = docker.from_env()
+            self.client.ping()  # Test connection
+            logger.info("ContainerManager initialized - Docker client connected")
+        except DockerException as e:
+            logger.error(f"Failed to connect to Docker: {e}")
+            logger.warning("ContainerManager will operate in degraded mode")
+            self.client = None
     
     async def startup(self):
         """

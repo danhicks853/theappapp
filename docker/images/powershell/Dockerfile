@@ -8,11 +8,13 @@ LABEL purpose="code-execution-sandbox"
 LABEL language="powershell"
 LABEL version="7"
 
-# Install common tools
+# Install common tools and Python (for TAS file operations)
 RUN apk add --no-cache \
     git \
     curl \
-    wget
+    wget \
+    python3 \
+    py3-pip
 
 WORKDIR /workspace
 

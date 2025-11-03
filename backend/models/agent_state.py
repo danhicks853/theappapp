@@ -85,11 +85,43 @@ class ValidationResult:
 
     @property
     def error_signature(self) -> str:
-        """Return a condensed signature to feed loop detection."""
+        """
+        Return a condensed signature to feed loop detection.
+        
+        Normalizes similar errors to catch repeating patterns:
+        - "Unknown tool: X" → "Unknown tool"
+        - "Unknown operation: X" → "Unknown operation"
+        - "Failed to connect to X" → "Connection failure"
+        """
 
         if self.success or not self.issues:
             return ""
-        return "|".join(sorted(str(issue) for issue in self.issues))
+        
+        # Normalize common error patterns
+        normalized = []
+        for issue in self.issues:
+            issue_str = str(issue)
+            
+            # Normalize tool/operation errors
+            if "Unknown tool:" in issue_str or "unknown tool:" in issue_str.lower():
+                normalized.append("Unknown tool")
+            elif "Unknown operation:" in issue_str or "unknown operation:" in issue_str.lower():
+                normalized.append("Unknown operation")
+            elif "Docker client not initialized" in issue_str or "docker" in issue_str.lower() and "not" in issue_str.lower():
+                normalized.append("Infrastructure not available")
+            elif "Failed to connect" in issue_str or "Connection refused" in issue_str:
+                normalized.append("Connection failure")
+            elif "Timeout" in issue_str or "timeout" in issue_str:
+                normalized.append("Timeout")
+            elif "Permission denied" in issue_str or "403" in issue_str or "401" in issue_str:
+                normalized.append("Permission error")
+            elif "Tool execution failed" in issue_str:
+                normalized.append("Tool execution failed")
+            else:
+                # Keep other errors as-is
+                normalized.append(issue_str)
+        
+        return "|".join(sorted(normalized))
 
 
 @dataclass

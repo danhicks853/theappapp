@@ -65,11 +65,12 @@ class FeedbackCollector:
             Feedback ID
         """
         logger.info(f"Collecting feedback for gate: {gate_id}, type={feedback_type}")
+        import json
         
         query = text("""
             INSERT INTO feedback_logs 
             (gate_id, feedback_type, feedback_text, agent_type, tags, metadata, created_at)
-            VALUES (:gate_id, :feedback_type, :feedback_text, :agent_type, :tags, :metadata::jsonb, NOW())
+            VALUES (:gate_id, :feedback_type, :feedback_text, :agent_type, :tags, :metadata, NOW())
             RETURNING id
         """)
         
@@ -79,8 +80,8 @@ class FeedbackCollector:
                 "feedback_type": feedback_type,
                 "feedback_text": feedback_text,
                 "agent_type": agent_type,
-                "tags": tags or [],
-                "metadata": metadata or {}
+                "tags": json.dumps(tags) if tags else None,
+                "metadata": json.dumps(metadata) if metadata else None
             })
             conn.commit()
             

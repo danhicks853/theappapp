@@ -375,13 +375,15 @@ class PhaseTransitionService:
     
     async def _store_transition_record(self, report: TransitionReport) -> None:
         """Store transition record in database."""
+        import json
+        
         query = text("""
             INSERT INTO phase_transitions 
             (id, project_id, from_phase, to_phase, completed_deliverables, 
              achievements, next_steps, new_agents, archived_artifacts, 
              summary, transition_time, created_at)
-            VALUES (:id, :project_id, :from_phase, :to_phase, :completed_deliverables::jsonb,
-                    :achievements::jsonb, :next_steps::jsonb, :new_agents, :archived_artifacts,
+            VALUES (:id, :project_id, :from_phase, :to_phase, :completed_deliverables,
+                    :achievements, :next_steps, :new_agents, :archived_artifacts,
                     :summary, :transition_time, NOW())
         """)
         
@@ -391,9 +393,9 @@ class PhaseTransitionService:
                 "project_id": report.project_id,
                 "from_phase": report.from_phase,
                 "to_phase": report.to_phase,
-                "completed_deliverables": report.completed_deliverables,
-                "achievements": report.achievements,
-                "next_steps": report.next_steps,
+                "completed_deliverables": json.dumps(report.completed_deliverables) if report.completed_deliverables else None,
+                "achievements": json.dumps(report.achievements) if report.achievements else None,
+                "next_steps": json.dumps(report.next_steps) if report.next_steps else None,
                 "new_agents": report.new_agents,
                 "archived_artifacts": report.archived_artifacts,
                 "summary": report.summary,

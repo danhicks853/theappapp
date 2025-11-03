@@ -70,10 +70,11 @@ class GateManager:
             Gate ID (UUID as string)
         """
         logger.info(f"Creating gate: type={gate_type}, agent={agent_id}, project={project_id}")
+        import json
         
         query = text("""
             INSERT INTO gates (project_id, agent_id, gate_type, reason, context, status, created_at)
-            VALUES (:project_id, :agent_id, :gate_type, :reason, :context::jsonb, 'pending', NOW())
+            VALUES (:project_id, :agent_id, :gate_type, :reason, :context, 'pending', NOW())
             RETURNING id
         """)
         
@@ -83,7 +84,7 @@ class GateManager:
                 "agent_id": agent_id,
                 "gate_type": gate_type,
                 "reason": reason,
-                "context": context
+                "context": json.dumps(context) if context else None
             })
             conn.commit()
             

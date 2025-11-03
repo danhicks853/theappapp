@@ -127,17 +127,66 @@ class AgentFactory:
         # Load versioned prompt
         system_prompt = await self.prompt_loading_service.get_active_prompt(agent_type)
         
-        # Create agent with versioned prompt
-        agent = BaseAgent(
-            agent_id=f"{agent_type}-{id(self)}",  # Generate unique ID
+        # Map agent type to concrete class
+        agent_class_map = {
+            'backend_developer': 'BackendDevAgent',
+            'frontend_developer': 'FrontendDevAgent',
+            'qa_engineer': 'QAEngineerAgent',
+            'security_expert': 'SecurityExpertAgent',
+            'devops_engineer': 'DevOpsEngineerAgent',
+            'documentation_expert': 'DocumentationExpertAgent',
+            'ui_ux_designer': 'UIUXDesignerAgent',
+            'github_specialist': 'GitHubSpecialistAgent',
+            'workshopper': 'WorkshopperAgent',
+            'project_manager': 'ProjectManagerAgent',
+            'orchestrator': 'BaseAgent'  # Orchestrator uses BaseAgent
+        }
+        
+        # Import and instantiate concrete agent class
+        agent_class_name = agent_class_map.get(agent_type, 'BaseAgent')
+        
+        # Dynamic import of agent class
+        if agent_class_name == 'BaseAgent':
+            agent_class = BaseAgent
+        else:
+            # Map to actual module filenames
+            module_map = {
+                'BackendDevAgent': 'backend_dev_agent',
+                'FrontendDevAgent': 'frontend_dev_agent',
+                'QAEngineerAgent': 'qa_engineer_agent',
+                'SecurityExpertAgent': 'security_expert_agent',
+                'DevOpsEngineerAgent': 'devops_engineer_agent',
+                'DocumentationExpertAgent': 'documentation_expert_agent',
+                'UIUXDesignerAgent': 'uiux_designer_agent',
+                'GitHubSpecialistAgent': 'github_specialist_agent',
+                'WorkshopperAgent': 'workshopper_agent',
+                'ProjectManagerAgent': 'project_manager_agent'
+            }
+            
+            module_name = module_map.get(agent_class_name)
+            if not module_name:
+                raise ValueError(f"No module mapping for agent class: {agent_class_name}")
+            
+            module = __import__(f'backend.agents.{module_name}', fromlist=[agent_class_name])
+            agent_class = getattr(module, agent_class_name)
+        
+        # Create agent instance with versioned prompt
+        # Extract openai_adapter from llm_client if available
+        openai_adapter = None
+        if hasattr(llm_client, 'openai'):
+            openai_adapter = llm_client.openai
+        
+        agent = agent_class(
+            agent_id=f"{agent_type}-{id(self)}",
             agent_type=agent_type,
             orchestrator=orchestrator,
             llm_client=llm_client,
+            openai_adapter=openai_adapter,
             system_prompt=system_prompt,
             **kwargs
         )
         
-        logger.info(f"Built-in agent created: {agent_type}")
+        logger.info(f"Built-in agent created: {agent_type} ({agent_class_name})")
         return agent
     
     async def _create_specialist_agent(
@@ -206,3 +255,56 @@ class AgentFactory:
         if agent_type and is_built_in_agent(agent_type):
             return AgentCategory.BUILT_IN
         return AgentCategory.SPECIALIST
+    
+    async def create_and_register_all_agents(
+        self,
+        orchestrator: Any,
+        llm_client: Any,
+        **kwargs
+    ) -> list[BaseAgent]:
+        """
+        Create and register all built-in agents with the orchestrator.
+        
+        Args:
+            orchestrator: Orchestrator instance to register agents with
+            llm_client: LLM client instance
+            **kwargs: Additional arguments for agents
+        
+        Returns:
+            List of created agent instances
+        """
+        logger.info("Creating and registering all built-in agents")
+        
+        agents = []
+        for agent_type in BUILT_IN_AGENTS:
+            try:
+                # Create agent
+                agent = await self._create_built_in_agent(
+                    agent_type=agent_type,
+                    orchestrator=orchestrator,
+                    llm_client=llm_client,
+                    **kwargs
+                )
+                
+                # Register with orchestrator
+                from backend.services.orchestrator import Agent, AgentType
+                orchestrator_agent = Agent(
+                    agent_id=agent.agent_id,
+                    agent_type=AgentType[agent_type.upper()],
+                    status="idle"
+                )
+                
+                registered = orchestrator.register_agent(orchestrator_agent)
+                if registered:
+                    logger.info(f"Registered agent: {agent_type}")
+                    agents.append(agent)
+                else:
+                    logger.warning(f"Failed to register agent: {agent_type}")
+            
+            except Exception as e:
+                logger.error(f"Failed to create agent {agent_type}: {e}", exc_info=True)
+                import traceback
+                traceback.print_exc()
+        
+        logger.info(f"Successfully created and registered {len(agents)} agents")
+        return agents

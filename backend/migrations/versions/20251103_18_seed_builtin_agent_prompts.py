@@ -56,7 +56,7 @@ Always prioritize:
             'notes': 'Initial orchestrator prompt'
         },
         {
-            'agent_type': 'backend_dev',
+            'agent_type': 'backend_developer',
             'version': '1.0.0',
             'prompt_text': '''You are an expert backend developer specializing in Python, FastAPI, and database design.
 
@@ -87,7 +87,7 @@ Always follow:
             'notes': 'Initial backend developer prompt'
         },
         {
-            'agent_type': 'frontend_dev',
+            'agent_type': 'frontend_developer',
             'version': '1.0.0',
             'prompt_text': '''You are an expert frontend developer specializing in React, TypeScript, and modern UI/UX.
 
@@ -248,7 +248,7 @@ Documentation standards:
             'notes': 'Initial documentation expert prompt'
         },
         {
-            'agent_type': 'uiux_designer',
+            'agent_type': 'ui_ux_designer',
             'version': '1.0.0',
             'prompt_text': '''You are a UI/UX designer focused on creating intuitive, beautiful user experiences.
 

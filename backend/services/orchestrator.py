@@ -13,6 +13,7 @@ from typing import Any, Awaitable, Dict, List, Optional
 
 from backend.models import AutonomyLevel
 from backend.services.autonomy_policy import should_escalate as autonomy_should_escalate
+from backend.agents.base_agent import TaskResult
 
 
 async def _awaitable(value: Any) -> Any:
@@ -74,12 +75,16 @@ class Task:
     task_id: str
     task_type: str
     agent_type: AgentType
+    description: str = ""  # Human-readable task description for orchestrator context
     priority: int = 0  # Higher number = higher priority
     payload: Dict[str, Any] = field(default_factory=dict)
+    project_id: Optional[str] = None  # Project this task belongs to
     created_at: datetime = field(default_factory=datetime.now)
     status: TaskStatus = TaskStatus.PENDING
     assigned_agent_id: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)  # For orchestrator context passing
+    deliverable_id: Optional[str] = None  # If task is for a deliverable
     
     def __lt__(self, other: 'Task') -> bool:
         """Support comparison for PriorityQueue when priorities are equal."""
@@ -280,21 +285,397 @@ class Orchestrator:
         """
         Add a task to the task queue.
         
-        Tasks are processed in priority order (higher priority first),
-        then FIFO for same priority.
+        If task.agent_type is None, intelligently assigns the appropriate agent
+        based on task description and available agents.
         
         Args:
-            task: Task to enqueue
+            task: Task to add to queue
             
         Raises:
             ValueError: If task is None
         """
         if not task:
-            raise ValueError("Task cannot be None")
+            raise ValueError("Task is required")
         
-        # PriorityQueue uses (priority, insertion_order, item)
+        if not task.task_id:
+            raise ValueError("Task must have task_id")
+        
+        # Intelligent agent assignment if not already assigned
+        if task.agent_type is None:
+            task.agent_type = self._intelligently_assign_agent_type(task)
+            self.logger.info(
+                f"Orchestrator assigned agent_type={task.agent_type.value} for task {task.task_id}"
+            )
+        
         # Negate priority so higher numbers = higher priority
         self.task_queue.put((-task.priority, task.created_at.timestamp(), task))
+    
+    async def on_task_completed(self, task: Task, result: TaskResult) -> None:
+        """
+        CORE ORCHESTRATOR INTELLIGENCE: Decide what happens next.
+        
+        Uses LLM reasoning with full project context to determine:
+        - Should we create another task? Which agent?
+        - Should we escalate to human?
+        - Is the project complete?
+        
+        This is the "project manager brain" - sees everything, decides next steps.
+        
+        Args:
+            task: Task that just completed
+            result: Result from the agent
+        """
+        self.logger.info(f"Orchestrator analyzing completion of task {task.task_id}")
+        
+        # 1. Gather full project context
+        project_context = await self._gather_project_context(task, result)
+        
+        # 2. Read agent outputs
+        agent_outputs = await self._read_agent_outputs(task, result)
+        
+        # 3. Ask LLM: "What should happen next?"
+        decision = await self._llm_decide_next_action(project_context, agent_outputs, task, result)
+        
+        # 4. Execute the decision
+        await self._execute_orchestrator_decision(decision, task, result)
+        
+        self.logger.info(
+            f"Orchestrator decision: {decision.get('action')} - {decision.get('reasoning')}"
+        )
+    
+    async def _gather_project_context(self, task: Task, result: TaskResult) -> Dict[str, Any]:
+        """
+        Gather complete project context for orchestrator decision-making.
+        
+        Returns:
+            Dict with project plan, scope, completed tasks, available agents, etc.
+        """
+        # Get project state
+        context = {
+            "project_id": self.project_id,
+            "project_goal": getattr(self.project_state, 'goal', 'Not yet defined'),
+            "current_phase": getattr(self.project_state, 'current_phase', 'initialization'),
+            
+            # Task that just completed
+            "completed_task": {
+                "id": task.task_id,
+                "description": task.description,
+                "agent_type": task.agent_type.value if task.agent_type else None,
+                "success": result.success,
+                "summary": result.summary if hasattr(result, 'summary') else None
+            },
+            
+            # Available agents
+            "available_agents": [
+                {
+                    "type": agent.agent_type.value if hasattr(agent.agent_type, 'value') else str(agent.agent_type),
+                    "status": agent.status
+                }
+                for agent in self.active_agents.values()
+            ],
+            
+            # Project history (recent tasks)
+            "completed_tasks_history": [
+                {
+                    "agent": t.agent_type.value if t.agent_type and hasattr(t.agent_type, 'value') else "unknown",
+                    "description": t.description,
+                    "status": t.status.value if hasattr(t.status, 'value') else str(t.status)
+                }
+                for t in list(self.project_state.task_history)[-5:]  # Last 5 tasks
+            ] if hasattr(self.project_state, 'task_history') else [],
+            
+            # Current state
+            "active_task_count": self.task_queue.qsize(),
+        }
+        
+        return context
+    
+    async def _read_agent_outputs(self, task: Task, result: TaskResult) -> Dict[str, str]:
+        """
+        Read files that the agent created.
+        
+        Returns:
+            Dict mapping filename → content
+        """
+        outputs = {}
+        
+        # Get files from result artifacts
+        if hasattr(result, 'artifacts') and result.artifacts:
+            for artifact in result.artifacts:
+                if isinstance(artifact, dict) and 'filename' in artifact:
+                    filename = artifact['filename']
+                    # Try to read the file via TAS
+                    try:
+                        content = await self._read_file_from_container(filename)
+                        if content:
+                            outputs[filename] = content
+                    except Exception as e:
+                        self.logger.warning(f"Could not read {filename}: {e}")
+        
+        return outputs
+    
+    async def _read_file_from_container(self, filename: str) -> Optional[str]:
+        """Read a file from the project container using TAS."""
+        if not self.tas_client:
+            return None
+        
+        try:
+            # Use TAS to read file
+            result = await self.execute_tool({
+                "tool_name": "file_system",
+                "operation": "read",
+                "parameters": {
+                    "project_id": self.project_id,
+                    "task_id": self.project_id,  # Use project_id as task_id for project-level files
+                    "path": filename
+                }
+            })
+            
+            if result.get("success"):
+                return result.get("content")
+        except Exception as e:
+            self.logger.debug(f"Could not read {filename}: {e}")
+        
+        return None
+    
+    async def _llm_decide_next_action(
+        self,
+        project_context: Dict[str, Any],
+        agent_outputs: Dict[str, str],
+        completed_task: Task,
+        result: TaskResult
+    ) -> Dict[str, Any]:
+        """
+        Use LLM to intelligently decide what should happen next.
+        
+        This is the CORE orchestrator intelligence - reasons about the project
+        state and makes informed decisions about workflow.
+        
+        Returns:
+            Decision dict with action, reasoning, next steps
+        """
+        # Build comprehensive prompt for LLM
+        prompt = self._build_orchestrator_decision_prompt(
+            project_context, agent_outputs, completed_task, result
+        )
+        
+        # Ask LLM for decision
+        if self.llm_client and hasattr(self.llm_client, 'query'):
+            try:
+                response = await self.llm_client.query(prompt)
+                decision = self._parse_orchestrator_decision(response)
+                return decision
+            except Exception as e:
+                self.logger.error(f"LLM decision error: {e}")
+                # Fallback to simple logic
+                return self._fallback_decision(project_context, completed_task)
+        else:
+            # No LLM available - use simple fallback
+            return self._fallback_decision(project_context, completed_task)
+    
+    def _build_orchestrator_decision_prompt(
+        self,
+        project_context: Dict[str, Any],
+        agent_outputs: Dict[str, str],
+        completed_task: Task,
+        result: TaskResult
+    ) -> str:
+        """Build the prompt for LLM orchestrator decision-making."""
+        
+        # Format agent outputs
+        outputs_text = "\n".join([
+            f"**{filename}**:\n```\n{content[:500]}...\n```"
+            for filename, content in agent_outputs.items()
+        ]) if agent_outputs else "No output files"
+        
+        # Format available agents
+        agents_text = "\n".join([
+            f"- {agent['type']} (status: {agent['status']})"
+            for agent in project_context['available_agents']
+        ])
+        
+        # Format task history
+        history_text = "\n".join([
+            f"{i+1}. {t['agent']}: {t['description']} → {t['status']}"
+            for i, t in enumerate(project_context.get('completed_tasks_history', []))
+        ]) if project_context.get('completed_tasks_history') else "This is the first task"
+        
+        prompt = f"""You are an intelligent orchestrator managing a software development project.
+
+PROJECT GOAL: {project_context['project_goal']}
+CURRENT PHASE: {project_context['current_phase']}
+
+=== TASK JUST COMPLETED ===
+Agent: {project_context['completed_task']['agent_type']}
+Task: {project_context['completed_task']['description']}
+Success: {project_context['completed_task']['success']}
+Summary: {project_context['completed_task']['summary']}
+
+=== AGENT OUTPUT FILES ===
+{outputs_text}
+
+=== PROJECT HISTORY ===
+{history_text}
+
+=== AVAILABLE AGENTS ===
+{agents_text}
+
+=== YOUR DECISION ===
+Analyze the situation and decide what should happen next:
+
+1. **What was accomplished?** Assess the completed work.
+2. **What's the logical next step?** Consider the project goal and current state.
+3. **Which agent should handle it?** Pick the right specialist.
+4. **What context do they need?** What information from previous tasks is relevant?
+5. **Or is something else needed?** (Human escalation? Project complete?)
+
+Respond in JSON format:
+{{
+    "action": "create_task" | "escalate_to_human" | "project_complete" | "wait_for_more_tasks",
+    "reasoning": "Clear explanation of why this is the right decision",
+    "next_agent_type": "agent type" (if action is create_task),
+    "task_description": "Specific task for the agent" (if action is create_task),
+    "context_to_pass": {{
+        "files_to_reference": ["filename1", "filename2"],
+        "key_information": "Important context from previous work"
+    }},
+    "urgency": "low" | "normal" | "high"
+}}
+
+Think like a project manager - be strategic, consider dependencies, and keep the project moving forward efficiently.
+"""
+        
+        return prompt
+    
+    def _parse_orchestrator_decision(self, llm_response: Any) -> Dict[str, Any]:
+        """Parse LLM response into decision dict."""
+        import json
+        
+        # If response is already a dict, return it
+        if isinstance(llm_response, dict):
+            return llm_response
+        
+        # Try to parse as JSON
+        if isinstance(llm_response, str):
+            try:
+                # Look for JSON in response
+                start = llm_response.find('{')
+                end = llm_response.rfind('}') + 1
+                if start >= 0 and end > start:
+                    json_str = llm_response[start:end]
+                    return json.loads(json_str)
+            except json.JSONDecodeError:
+                pass
+        
+        # Fallback: create decision from response text
+        return {
+            "action": "wait_for_more_tasks",
+            "reasoning": "Could not parse LLM decision",
+            "raw_response": str(llm_response)
+        }
+    
+    def _fallback_decision(self, project_context: Dict[str, Any], completed_task: Task) -> Dict[str, Any]:
+        """Simple fallback decision logic if LLM unavailable."""
+        return {
+            "action": "wait_for_more_tasks",
+            "reasoning": "LLM unavailable - waiting for external task creation",
+            "next_agent_type": None
+        }
+    
+    async def _execute_orchestrator_decision(
+        self,
+        decision: Dict[str, Any],
+        completed_task: Task,
+        result: TaskResult
+    ) -> None:
+        """Execute the orchestrator's decision."""
+        action = decision.get('action')
+        
+        if action == 'create_task':
+            # Create next task
+            await self._create_next_task_from_decision(decision, completed_task)
+        
+        elif action == 'escalate_to_human':
+            # Escalate for human decision
+            await self.escalate_to_human(
+                reason=decision.get('reasoning', 'Orchestrator requesting guidance'),
+                context={
+                    "completed_task": completed_task.task_id,
+                    "decision": decision
+                }
+            )
+        
+        elif action == 'project_complete':
+            # Mark project as complete
+            self.logger.info("🎉 Orchestrator determined project is complete!")
+            self.project_state.status = "completed"
+        
+        elif action == 'wait_for_more_tasks':
+            # Do nothing - wait for external task creation
+            pass
+        
+        else:
+            self.logger.warning(f"Unknown orchestrator action: {action}")
+    
+    async def _create_next_task_from_decision(
+        self,
+        decision: Dict[str, Any],
+        previous_task: Task
+    ) -> None:
+        """Create and enqueue the next task based on orchestrator decision."""
+        # Determine agent type
+        agent_type_str = decision.get('next_agent_type', 'workshopper')
+        try:
+            agent_type = AgentType[agent_type_str.upper()]
+        except (KeyError, AttributeError):
+            # Try to find matching agent type
+            for at in AgentType:
+                if agent_type_str.lower() in at.value.lower():
+                    agent_type = at
+                    break
+            else:
+                agent_type = AgentType.WORKSHOPPER  # Default fallback
+        
+        # Build task description with context
+        task_description = decision.get('task_description', 'Continue project work')
+        context_to_pass = decision.get('context_to_pass', {})
+        
+        # Add context information to description
+        if context_to_pass:
+            files_ref = context_to_pass.get('files_to_reference', [])
+            key_info = context_to_pass.get('key_information', '')
+            
+            if files_ref:
+                task_description += f"\n\nReference files: {', '.join(files_ref)}"
+            if key_info:
+                task_description += f"\n\nContext: {key_info}"
+        
+        # Determine priority (higher is more urgent)
+        urgency = decision.get('urgency', 'normal')
+        priority = 10 if urgency == 'high' else 5 if urgency == 'normal' else 1
+        
+        # Create task
+        next_task = Task(
+            task_id=f"orch-task-{id(self)}-{len(self.project_state.task_history) if hasattr(self.project_state, 'task_history') else 0}",
+            task_type=decision.get('task_type', 'orchestrator_assigned'),
+            description=task_description,
+            agent_type=agent_type,
+            priority=priority,
+            status=TaskStatus.PENDING,
+            project_id=self.project_id,
+            metadata={
+                "orchestrator_decision": True,
+                "previous_task_id": previous_task.task_id,
+                "context": context_to_pass
+            }
+        )
+        
+        # Enqueue it
+        self.enqueue_task(next_task)
+        
+        self.logger.info(
+            f"Orchestrator created next task: {next_task.task_id} for {agent_type.value}"
+        )
     
     def dequeue_task(self) -> Optional[Task]:
         """
@@ -493,16 +874,32 @@ class Orchestrator:
         if not self.tas_client or not hasattr(self.tas_client, "execute_tool"):
             raise NotImplementedError("TAS client not configured for orchestrator")
 
-        response = await _awaitable(self.tas_client.execute_tool(tool_request))
+        # Convert tool_request to TAS format
+        from backend.services.tool_access_service import ToolExecutionRequest
+        
+        tas_request = ToolExecutionRequest(
+            agent_id=tool_request.get("agent_id", "unknown"),
+            agent_type=tool_request.get("agent_type", "unknown"),
+            tool_name=tool_request.get("tool", ""),
+            operation=tool_request.get("operation", ""),
+            parameters=tool_request.get("parameters", {}),
+            project_id=tool_request.get("project_id"),
+            task_id=tool_request.get("task_id")
+        )
+        
+        response = await self.tas_client.execute_tool(tas_request)
+        
         audit_record = {
-            "status": response.get("status", "unknown"),
-            "result": response.get("result"),
-            "error": response.get("error"),
+            "status": "success" if response.success else "failed",
+            "result": response.result,
+            "error": response.message if not response.success else None,
             "audited_at": datetime.now(UTC).isoformat(),
+            "allowed": response.allowed
         }
+        
         self.logger.info(
             "Tool execution routed | tool=%s | status=%s",
-            tool_request.get("tool_name"),
+            tool_request.get("tool"),
             audit_record["status"],
         )
         return audit_record
@@ -888,6 +1285,42 @@ class Orchestrator:
             "reasoning": routing_result.get("reasoning"),
             "awaiting_response": True
         }
+    
+    def _intelligently_assign_agent_type(self, task: Task) -> AgentType:
+        """
+        Intelligently assign the best agent type for a task based on its description,
+        metadata, and available agents.
+        
+        This is the core orchestrator intelligence - analyzing task requirements and
+        matching them to the right specialist.
+        
+        Args:
+            task: Task that needs agent assignment
+            
+        Returns:
+            AgentType best suited for the task
+        """
+        # Get task info for analysis
+        description = task.description.lower() if task.description else ""
+        deliverable_type = task.metadata.get("deliverable_type", "").lower() if task.metadata else ""
+        title = task.metadata.get("deliverable_title", "").lower() if task.metadata else ""
+        
+        # Combine all context for intelligent analysis
+        full_context = f"{description} {deliverable_type} {title}"
+        
+        # Use specialist analysis logic
+        potential_agents = self._analyze_question_for_specialists(full_context)
+        
+        # Return the first recommended agent, or fallback to workshopper
+        if potential_agents:
+            selected = potential_agents[0]
+            self.logger.info(
+                f"Task {task.task_id}: Selected {selected.value} based on analysis of: {deliverable_type} - {title}"
+            )
+            return selected
+        
+        # Default fallback
+        return AgentType.WORKSHOPPER
     
     def _analyze_question_for_specialists(
         self,
